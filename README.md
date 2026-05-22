@@ -97,3 +97,5 @@ Production upgrade path when traffic grows:
 5. Add structured logs/metrics around `requestId`, route, status, latency, and n8n response codes.
 
 Note: n8n `webhook-test` URLs can return 404 unless the workflow is actively waiting after clicking `Execute workflow`; that is an n8n workflow state issue, not necessarily an app failure.
+
+Production `/webhook/...` URLs must have the n8n workflow activated with the editor toggle. If the app returns a message like `The requested webhook "POST assignment-writer" is not registered`, the website reached n8n successfully but the production workflow is not active yet. Activate the workflow in n8n, then retry the website/API call.

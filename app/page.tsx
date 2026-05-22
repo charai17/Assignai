@@ -5,6 +5,7 @@ import { FormEvent, useMemo, useState } from "react";
 type Mode = "assignment" | "humanizer";
 
 type ApiResponse = {
+  ok?: boolean;
   output?: string;
   result?: string;
   text?: string;
@@ -17,6 +18,57 @@ const wordCounts = ["500", "750", "1000", "1500", "2000"];
 const assignmentTones = ["Academic", "Analytical", "Persuasive", "Informative", "Professional"];
 const humanizerTones = ["Natural", "Conversational", "Professional", "Friendly", "Confident"];
 const subjects = ["General", "English", "History", "Science", "Business", "Technology", "Health"];
+
+const backendAgents = [
+  {
+    name: "Coordinator Agent",
+    status: "Building",
+    owner: "Mission sequence, file ownership, final integration",
+    next: "Coordinating the assignment workflow wiring against production n8n.",
+  },
+  {
+    name: "Webhook Integration Agent",
+    status: "Wiring production n8n",
+    owner: "Assignment webhook contract, retries, response mapping",
+    next: "Assignment generation is being connected and tested with the production n8n webhook.",
+  },
+  {
+    name: "API Safety Agent",
+    status: "Active",
+    owner: "Validation, input limits, rate limit, request IDs, health endpoint",
+    next: "Adding safer request handling around the assignment workflow while integration tests run.",
+  },
+  {
+    name: "Frontend Contract Agent",
+    status: "Active",
+    owner: "Keeps the UI connected to /api/assignment and /api/humanize",
+    next: "Confirming the Assignment Writer stays wired to /api/assignment without changing the UI flow.",
+  },
+  {
+    name: "QA / Observability Agent",
+    status: "Testing",
+    owner: "Build checks, curl tests, browser smoke test, console verification",
+    next: "Smoke-testing the production assignment webhook path as each backend change lands.",
+  },
+  {
+    name: "Humanizer Integration Agent",
+    status: "Pending / mock",
+    owner: "Humanizer webhook contract and response mapping",
+    next: "Humanizer remains on the existing pending/mock path unless its production webhook is configured.",
+  },
+  {
+    name: "Data / History Agent",
+    status: "Optional later",
+    owner: "Saved prompts, outputs, database history",
+    next: "Starts only if you want history saved now.",
+  },
+  {
+    name: "Auth / Credits Agent",
+    status: "Optional later",
+    owner: "Login, user limits, credits, paid usage foundation",
+    next: "Recommended after production assignment workflow is verified.",
+  },
+];
 
 export default function HomePage() {
   const [mode, setMode] = useState<Mode>("assignment");
@@ -69,8 +121,8 @@ export default function HomePage() {
         // Non-JSON responses are handled by the status/output checks below.
       }
 
-      if (!response.ok) {
-        throw new Error(data.error || data.message || "The request failed. Please try again.");
+      if (!response.ok || data.ok === false) {
+        throw new Error(data.result || data.error || data.message || "The request failed. Please try again.");
       }
 
       const generated = data.output || data.result || data.text || "";
@@ -267,6 +319,31 @@ export default function HomePage() {
               </div>
             </section>
 
+            <section id="mission-control" className="rounded-[2rem] border border-stone-200 bg-[#15130f] p-5 text-white shadow-[0_24px_80px_rgba(68,53,35,0.18)] sm:p-6">
+              <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200/80">Backend Mission Control</p>
+                  <h2 className="mt-2 text-2xl font-semibold tracking-tight">Agent build roster</h2>
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-stone-300">
+                    These agents are actively building and wiring the Assignment Writer workflow against the production n8n webhook. The Humanizer path remains pending/mock unless its production webhook is configured.
+                  </p>
+                </div>
+                <div className="rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-200">
+                  Assignment build active
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                {backendAgents.map((agent) => (
+                  <MissionAgentCard key={agent.name} {...agent} />
+                ))}
+              </div>
+
+              <div className="mt-5 rounded-3xl border border-white/10 bg-white/5 p-4 text-sm leading-6 text-stone-300">
+                <span className="font-semibold text-white">Current focus:</span> production n8n assignment workflow wiring and verification. Humanizer stays pending/mock until a production webhook is configured.
+              </div>
+            </section>
+
             <section className="rounded-[2rem] border border-stone-200 bg-white/55 p-5 shadow-sm lg:hidden">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">History</p>
               <div className="mt-3 grid gap-2 sm:grid-cols-3">
@@ -279,6 +356,23 @@ export default function HomePage() {
         </section>
       </div>
     </main>
+  );
+}
+
+function MissionAgentCard({ name, status, owner, next }: { name: string; status: string; owner: string; next: string }) {
+  return (
+    <article className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <h3 className="text-base font-semibold text-white">{name}</h3>
+        <span className="shrink-0 rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-amber-100">
+          {status}
+        </span>
+      </div>
+      <p className="text-sm leading-6 text-stone-300">{owner}</p>
+      <p className="mt-3 rounded-2xl bg-black/20 px-3 py-2 text-xs leading-5 text-stone-400">
+        <span className="font-semibold text-stone-200">Next:</span> {next}
+      </p>
+    </article>
   );
 }
 
