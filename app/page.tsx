@@ -70,6 +70,22 @@ const backendAgents = [
   },
 ];
 
+const buildChecks = ["typecheck", "build", "health"];
+
+const nextBackendTasks = [
+  "History / persistence for saved prompts and generated outputs",
+  "Auth / credits are optional after the core assignment flow is stable",
+  "Humanizer webhook remains pending until a production endpoint is configured",
+];
+
+const buildLogEntries = [
+  "Phase: Backend build active — production assignment workflow integration is the current focus.",
+  "GitHub: latest push d736732 feat: wire assignment n8n workflow.",
+  "Checks: typecheck, build, and health passed at this checkpoint.",
+  "n8n: website calls n8n; workflow activation is the remaining blocker if the webhook returns 404.",
+  "Next: persistence/history, optional auth/credits, and the pending Humanizer webhook.",
+];
+
 export default function HomePage() {
   const [mode, setMode] = useState<Mode>("assignment");
   const [assignmentPrompt, setAssignmentPrompt] = useState("");
@@ -316,6 +332,82 @@ export default function HomePage() {
                     </p>
                   </div>
                 )}
+              </div>
+            </section>
+
+            <section className="overflow-hidden rounded-[2rem] border border-amber-200 bg-[#211a12] text-white shadow-[0_24px_80px_rgba(68,53,35,0.16)]">
+              <div className="border-b border-white/10 bg-amber-400/10 px-5 py-4 sm:px-6">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">Build Progress</p>
+                    <h2 className="mt-1 text-2xl font-semibold tracking-tight">Live Build Log checkpoint</h2>
+                    <p className="mt-2 max-w-2xl text-sm leading-6 text-amber-50/75">
+                      Static checkpoint view of what is being built now. This is not a real-time stream; it records the latest known frontend/backend integration status.
+                    </p>
+                  </div>
+                  <span className="inline-flex w-max items-center gap-2 rounded-full border border-emerald-300/30 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-200">
+                    <span className="h-2 w-2 rounded-full bg-emerald-300" />
+                    Backend build active
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid gap-4 p-5 sm:p-6 lg:grid-cols-[1.15fr_0.85fr]">
+                <div className="rounded-3xl border border-white/10 bg-black/20 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <h3 className="text-sm font-semibold uppercase tracking-[0.16em] text-stone-300">Checkpoint log</h3>
+                    <span className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-amber-100">
+                      Latest status
+                    </span>
+                  </div>
+                  <ol className="space-y-3 text-sm leading-6 text-stone-200">
+                    {buildLogEntries.map((entry, index) => (
+                      <li key={entry} className="flex gap-3">
+                        <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-amber-200/20 bg-amber-200/10 text-[11px] font-bold text-amber-100">
+                          {index + 1}
+                        </span>
+                        <span>{entry}</span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+
+                <div className="grid gap-4">
+                  <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-300">Latest GitHub push</p>
+                    <p className="mt-3 font-mono text-sm text-amber-100">d736732</p>
+                    <p className="mt-1 text-sm leading-6 text-stone-300">feat: wire assignment n8n workflow</p>
+                  </div>
+
+                  <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-300">Checks passed</p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {buildChecks.map((check) => (
+                        <span key={check} className="rounded-full border border-emerald-300/25 bg-emerald-400/10 px-3 py-1 text-xs font-semibold text-emerald-200">
+                          ✓ {check}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-300">n8n status</p>
+                    <p className="mt-3 text-sm leading-6 text-stone-300">
+                      Website calls n8n. Workflow activation is the blocker to resolve if the production webhook responds with 404.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-white/10 bg-white/[0.06] p-4 lg:col-span-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-stone-300">Next backend tasks</p>
+                  <div className="mt-3 grid gap-2 md:grid-cols-3">
+                    {nextBackendTasks.map((task) => (
+                      <div key={task} className="rounded-2xl border border-white/10 bg-black/20 px-3 py-2 text-sm leading-6 text-stone-300">
+                        {task}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </section>
 
