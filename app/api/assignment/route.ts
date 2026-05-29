@@ -1,6 +1,6 @@
-import { applyRateLimit, createRequestId, jsonResult, parseJsonRequest, validateWebhookPayload } from "@/lib/api";
+import { applyRateLimit, createRequestId, jsonResult, parseJsonRequest, validateGenerationPayload } from "@/lib/api";
+import { generateResult } from "@/lib/ai";
 import { getConfig } from "@/lib/config";
-import { proxyToN8n } from "@/lib/n8n";
 
 export const dynamic = "force-dynamic";
 
@@ -14,12 +14,12 @@ export async function POST(request: Request) {
     return jsonResult({ ok: false, result: parsed.error, raw: { requestId } }, 400, requestId);
   }
 
-  const validated = validateWebhookPayload(parsed.body, getConfig().limits.maxInputChars);
+  const validated = validateGenerationPayload(parsed.body, getConfig().limits.maxInputChars);
   if (!validated.ok) {
     return jsonResult({ ok: false, result: validated.error, raw: { requestId } }, 400, requestId);
   }
 
-  const { result, status } = await proxyToN8n({
+  const { result, status } = await generateResult({
     kind: "assignment",
     input: validated.value.input,
     payload: validated.value.payload,
