@@ -3,7 +3,7 @@
 AssignAI is a focused writing and presentation studio with three tools:
 
 - Assignment Writer: analyzes a brief, optional rubric, and extra information, then plans, writes section by section, humanizes, and exports the result.
-- Humanizer: rewrites stiff text so it reads more naturally while preserving meaning.
+- Humanizer: takes pasted text and returns a cleaner, more natural version while preserving meaning.
 - PowerPoint Creator: turns a topic into a slide-by-slide outline and exports a `.pptx` deck.
 
 The UI is built with Next.js, React, TypeScript, and Tailwind CSS. The backend is owned by the app directly and routes generation through OpenRouter when a key is configured.
@@ -19,6 +19,16 @@ The UI is built with Next.js, React, TypeScript, and Tailwind CSS. The backend i
 7. It writes the assignment section by section.
 8. It humanizes the final draft while keeping the academic meaning and citation placeholders intact.
 9. The user edits the result in-app, then exports text or `.docx`.
+
+## Humanizer Flow
+
+1. User opens the Humanizer section.
+2. User pastes the original text into the input box.
+3. User selects a tone such as Natural, Conversational, Professional, Friendly, or Confident.
+4. The UI sends the text to `POST /api/humanize`.
+5. The backend calls OpenRouter with the natural writing policy adapted from `blader/humanizer`.
+6. The response returns only the humanized text, with no labels, notes, scores, or extra commentary.
+7. The user can edit the humanized output, copy it, download it as text, or export it as `.docx`.
 
 ## Humanizer Policy
 
