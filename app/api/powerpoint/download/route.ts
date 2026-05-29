@@ -223,7 +223,8 @@ async function buildPresentation(slides: DeckSlide[]): Promise<Buffer> {
     });
   });
 
-  return pptx.write({ outputType: "nodebuffer" }) as Promise<Buffer>;
+  const written = await pptx.write({ outputType: "nodebuffer" });
+  return Buffer.isBuffer(written) ? written : Buffer.from(written as ArrayBuffer);
 }
 
 function formatBullets(bullets: string[]): string {
