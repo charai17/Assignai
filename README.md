@@ -2,7 +2,7 @@
 
 AssignAI is a focused writing and presentation studio with three tools:
 
-- Assignment Writer: analyzes a brief, optional rubric, and extra information, then plans, writes section by section, humanizes, checks word count with code, alphabetizes references, and exports the result.
+- Assignment Writer: analyzes a brief, optional rubric, and extra information, then plans, writes section by section, checks each section's word count with code, rewrites out-of-range sections, humanizes, alphabetizes references, and exports the result.
 - Humanizer: takes pasted text and returns a cleaner, more natural version while preserving meaning.
 - PowerPoint Creator: turns a topic into a slide-by-slide outline and exports a `.pptx` deck.
 
@@ -51,12 +51,14 @@ Tables:
 4. Stage 1 analyzes the assignment and identifies topic, task type, citation style, academic level, marking priorities, missing information, and target word count.
 5. Stage 1 also creates a section plan with target word counts that add up to the selected assignment word count.
 6. Stage 2 writes the assignment section by section and includes "References used in this section" under each section.
-7. Stage 3 humanizes and polishes the draft while keeping meaning, structure, citations, and placeholders intact.
-8. The backend counts the words in code. If the final draft is outside 10% of the selected target, it sends the draft through an automatic adjustment pass.
-9. The backend extracts reference lines and citation placeholders from the section drafts, deduplicates them, and sorts them alphabetically in an `Alphabetized References` section.
-10. The final output includes `Brief Analysis`, `Section Plan With Word Counts`, `Writing Plan`, `Section-by-Section Draft`, `Humanized Final Draft`, `Alphabetized References`, `Word Count Check`, and `Final Checks Before Submission`.
+7. Stage 3 checks every drafted section with code before humanizing. Each section gets its own 90% to 110% accepted range based on the section target.
+8. If any section is outside its own 10% range, the backend sends only that section back through a rewrite loop. The loop can rewrite the section up to two times while preserving the heading, meaning, citations, placeholders, and section reference list.
+9. Stage 4 humanizes and polishes the verified section draft while keeping meaning, structure, citations, placeholders, and section balance intact.
+10. The backend still runs a final whole-draft word count check after humanizing. If the final draft is outside 10% of the selected target, it sends the full draft through an automatic adjustment pass.
+11. The backend extracts reference lines and citation placeholders from the section drafts, deduplicates them, and sorts them alphabetically in an `Alphabetized References` section.
+12. The final output includes `Brief Analysis`, `Section Plan With Word Counts`, `Writing Plan`, `Section-by-Section Draft`, `Section Word Count Checks`, `Humanized Final Draft`, `Alphabetized References`, `Word Count Check`, and `Final Checks Before Submission`.
 
-The word counter is deterministic code, not an AI guess. It counts the words inside the Humanized Final Draft only, excluding the plan, references, and checklist. The status reports whether the final draft is within the accepted 90% to 110% range.
+The word counter is deterministic code, not an AI guess. Section checks count each section before humanizing and exclude that section's reference list. The final check counts the words inside the Humanized Final Draft only, excluding the plan, references, and checklist.
 
 ## Humanizer Flow
 
