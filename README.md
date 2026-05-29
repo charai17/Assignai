@@ -2,11 +2,23 @@
 
 AssignAI is a focused writing and presentation studio with three tools:
 
-- Assignment Writer: creates structured academic drafts from a prompt, level, word target, tone, subject, rubric, citation style, and source notes.
+- Assignment Writer: analyzes a brief, optional rubric, and extra information, then plans, writes section by section, humanizes, and exports the result.
 - Humanizer: rewrites stiff text so it reads more naturally while preserving meaning.
 - PowerPoint Creator: turns a topic into a slide-by-slide outline and exports a `.pptx` deck.
 
 The UI is built with Next.js, React, TypeScript, and Tailwind CSS. The backend is owned by the app directly and routes generation through OpenRouter when a key is configured.
+
+## Assignment Writer Flow
+
+1. User enters the assignment brief as the main prompt.
+2. User can optionally add rubric / marking criteria.
+3. User can optionally add extra information such as source notes, required readings, tutor instructions, a preferred argument, or an existing draft.
+4. The AI analyzes what the assignment is about.
+5. It infers or uses the selected word count, citation style, academic level, tone, and subject.
+6. It breaks the assignment into sections with target word counts.
+7. It writes the assignment section by section.
+8. It humanizes the final draft while keeping the academic meaning and citation placeholders intact.
+9. The user edits the result in-app, then exports text or `.docx`.
 
 ## How It Works
 
