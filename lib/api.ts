@@ -8,7 +8,7 @@ export type ApiResult = {
   raw?: unknown;
 };
 
-export type N8nProxyKind = "assignment" | "humanize";
+export type ToolKind = "assignment" | "humanize" | "powerpoint";
 
 export type ValidatedPayload = {
   input: string;
@@ -39,13 +39,13 @@ export async function parseJsonRequest(request: Request): Promise<JsonParseResul
   }
 }
 
-export function validateWebhookPayload(body: unknown, maxInputChars: number): ValidationResult {
+export function validateGenerationPayload(body: unknown, maxInputChars: number): ValidationResult {
   if (!body || typeof body !== "object" || Array.isArray(body)) {
     return { ok: false, error: "Request body must be a JSON object." };
   }
 
   const record = body as Record<string, unknown>;
-  const candidates = [record.input, record.text, record.assignment, record.content];
+  const candidates = [record.input, record.text, record.assignment, record.content, record.prompt, record.topic];
   const input = candidates.find((value): value is string => typeof value === "string");
 
   if (typeof input !== "string") {
@@ -75,7 +75,7 @@ export function jsonResult(result: ApiResult, status: number, requestId: string)
   return response;
 }
 
-export function applyRateLimit(request: Request, route: string, requestId: string): NextResponse<ApiResult> | null {
+export function applyRateLimit(request: Request, route: ToolKind, requestId: string): NextResponse<ApiResult> | null {
   const config = getConfig();
   const rateLimit = checkRateLimit({
     key: `${route}:${getClientIp(request)}`,

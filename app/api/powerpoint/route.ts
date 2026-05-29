@@ -6,7 +6,7 @@ export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   const requestId = createRequestId();
-  const rateLimited = applyRateLimit(request, "humanize", requestId);
+  const rateLimited = applyRateLimit(request, "powerpoint", requestId);
   if (rateLimited) return rateLimited;
 
   const parsed = await parseJsonRequest(request);
@@ -20,7 +20,7 @@ export async function POST(request: Request) {
   }
 
   const { result, status } = await generateResult({
-    kind: "humanize",
+    kind: "powerpoint",
     input: validated.value.input,
     payload: validated.value.payload,
     requestId,

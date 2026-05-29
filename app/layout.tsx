@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Assignment Humanizer",
-  description: "Generate polished assignment drafts and humanize text for student and client workflows."
+  title: "AssignAI",
+  description: "Write assignments, humanize text, and create PowerPoint-ready outlines in one focused workspace."
 };
 
 export default function RootLayout({
