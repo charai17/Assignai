@@ -1,12 +1,12 @@
+export type AiProvider = "mock" | "openai";
+
 export type AppConfig = {
   serviceName: string;
-  n8n: {
-    assignmentWebhookUrl?: string;
-    humanizerWebhookUrl?: string;
-    authHeader?: string;
-    authValue?: string;
+  ai: {
+    provider: AiProvider;
+    openaiApiKey?: string;
+    openaiModel: string;
     timeoutMs: number;
-    retries: number;
   };
   limits: {
     maxInputChars: number;
@@ -15,22 +15,22 @@ export type AppConfig = {
   };
 };
 
-const DEFAULT_TIMEOUT_MS = 30_000;
-const DEFAULT_RETRIES = 1;
+const DEFAULT_TIMEOUT_MS = 45_000;
 const DEFAULT_MAX_INPUT_CHARS = 20_000;
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 20;
+const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
 
 export function getConfig(): AppConfig {
+  const openaiApiKey = optionalEnv("OPENAI_API_KEY");
+
   return {
-    serviceName: process.env.SERVICE_NAME || "assignment-humanizer",
-    n8n: {
-      assignmentWebhookUrl: optionalEnv("N8N_ASSIGNMENT_WEBHOOK_URL"),
-      humanizerWebhookUrl: optionalEnv("N8N_HUMANIZER_WEBHOOK_URL"),
-      authHeader: optionalEnv("N8N_WEBHOOK_AUTH_HEADER"),
-      authValue: optionalEnv("N8N_WEBHOOK_AUTH_VALUE"),
-      timeoutMs: readPositiveInteger("N8N_WEBHOOK_TIMEOUT_MS", DEFAULT_TIMEOUT_MS),
-      retries: readNonNegativeInteger("N8N_WEBHOOK_RETRIES", DEFAULT_RETRIES),
+    serviceName: process.env.SERVICE_NAME || "assignai",
+    ai: {
+      provider: openaiApiKey ? "openai" : "mock",
+      openaiApiKey,
+      openaiModel: optionalEnv("OPENAI_MODEL") || DEFAULT_OPENAI_MODEL,
+      timeoutMs: readPositiveInteger("AI_REQUEST_TIMEOUT_MS", DEFAULT_TIMEOUT_MS),
     },
     limits: {
       maxInputChars: readPositiveInteger("MAX_INPUT_CHARS", DEFAULT_MAX_INPUT_CHARS),
@@ -48,9 +48,4 @@ function optionalEnv(name: string): string | undefined {
 function readPositiveInteger(name: string, fallback: number): number {
   const value = Number.parseInt(process.env[name] || "", 10);
   return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-function readNonNegativeInteger(name: string, fallback: number): number {
-  const value = Number.parseInt(process.env[name] || "", 10);
-  return Number.isFinite(value) && value >= 0 ? value : fallback;
 }
