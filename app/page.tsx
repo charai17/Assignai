@@ -1,8 +1,11 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import type { SupabaseClient, User } from "@supabase/supabase-js";
+import { getSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase";
 
 type Mode = "assignment" | "humanizer" | "powerpoint";
+type AuthMode = "sign-in" | "sign-up";
 
 type ApiResponse = {
   ok?: boolean;
@@ -20,6 +23,14 @@ type HistoryEntry = {
   preview: string;
   output: string;
   createdAt: string;
+};
+
+type GenerationRow = {
+  id: string;
+  mode: Mode;
+  title: string;
+  output: string;
+  created_at: string;
 };
 
 const HISTORY_KEY = "assignai-history";
@@ -62,6 +73,7 @@ const modeCopy: Record<Mode, { label: string; icon: string; eyebrow: string; out
 };
 
 export default function HomePage() {
+  const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [mode, setMode] = useState<Mode>("assignment");
   const [assignmentPrompt, setAssignmentPrompt] = useState("");
   const [rubric, setRubric] = useState("");
@@ -79,6 +91,12 @@ export default function HomePage() {
   const [deckStyle, setDeckStyle] = useState(deckStyles[0]);
   const [audience, setAudience] = useState(audiences[0]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [user, setUser] = useState<User | null>(null);
+  const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [authStatus, setAuthStatus] = useState("");
+  const [syncStatus, setSyncStatus] = useState("");
   const [output, setOutput] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -93,6 +111,22 @@ export default function HomePage() {
       window.localStorage.removeItem(HISTORY_KEY);
     }
   }, []);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    supabase.auth.getUser().then(({ data }) => {
+      setUser(data.user);
+      if (data.user) void loadCloudHistory(data.user.id, supabase);
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+      if (session?.user) void loadCloudHistory(session.user.id, supabase);
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, [supabase]);
 
   const activeInput = useMemo(() => {
     if (mode === "assignment") return assignmentPrompt.trim();
@@ -133,12 +167,86 @@ export default function HomePage() {
       const generated = data.output || data.result || data.text || "";
       if (!generated) throw new Error("No output was returned from the server.");
       setOutput(generated);
-      saveHistory(generated);
+      await saveHistory(generated);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleAuth(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthStatus("");
+
+    if (!supabase) {
+      setAuthStatus("Supabase is not configured yet.");
+      return;
+    }
+
+    if (!email.trim() || password.length < 6) {
+      setAuthStatus("Enter an email and a password with at least 6 characters.");
+      return;
+    }
+
+    const authRequest = authMode === "sign-in"
+      ? supabase.auth.signInWithPassword({ email: email.trim(), password })
+      : supabase.auth.signUp({ email: email.trim(), password });
+
+    const { data, error: authError } = await authRequest;
+
+    if (authError) {
+      setAuthStatus(authError.message);
+      return;
+    }
+
+    if (authMode === "sign-up" && !data.session) {
+      setAuthStatus("Account created. Check your email if confirmation is enabled.");
+      return;
+    }
+
+    setUser(data.user ?? null);
+    setAuthStatus(authMode === "sign-in" ? "Signed in." : "Account created.");
+  }
+
+  async function signOut() {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setUser(null);
+    setSyncStatus("Signed out. Showing this device's history.");
+    try {
+      const saved = window.localStorage.getItem(HISTORY_KEY);
+      setHistory(saved ? (JSON.parse(saved) as HistoryEntry[]) : []);
+    } catch {
+      setHistory([]);
+    }
+  }
+
+  async function loadCloudHistory(userId: string, client: SupabaseClient = supabase as SupabaseClient) {
+    setSyncStatus("Loading saved history...");
+    const { data, error: historyError } = await client
+      .from("generations")
+      .select("id, mode, title, output, created_at")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(8);
+
+    if (historyError) {
+      setSyncStatus("Local history is active. Run the Supabase schema if cloud history is not ready yet.");
+      return;
+    }
+
+    const entries = ((data || []) as GenerationRow[]).map((row) => ({
+      id: row.id,
+      mode: row.mode,
+      title: row.title,
+      preview: row.output.replace(/\s+/g, " ").slice(0, 90),
+      output: row.output,
+      createdAt: row.created_at,
+    }));
+
+    setHistory(entries);
+    setSyncStatus("Cloud history synced.");
   }
 
   async function copyOutput() {
@@ -238,7 +346,7 @@ export default function HomePage() {
     setCopied(false);
   }
 
-  function saveHistory(generated: string) {
+  async function saveHistory(generated: string) {
     const entry: HistoryEntry = {
       id: crypto.randomUUID(),
       mode,
@@ -251,6 +359,22 @@ export default function HomePage() {
     const nextHistory = [entry, ...history].slice(0, 8);
     setHistory(nextHistory);
     window.localStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory));
+
+    if (!supabase || !user) {
+      setSyncStatus(hasSupabaseConfig() ? "Saved on this device. Sign in to sync." : "Saved on this device.");
+      return;
+    }
+
+    const { error: saveError } = await supabase.from("generations").insert({
+      user_id: user.id,
+      mode,
+      title: entry.title,
+      input: activeInput,
+      output: generated,
+      metadata: payloadForMode(mode),
+    });
+
+    setSyncStatus(saveError ? "Saved locally. Cloud save needs the Supabase schema." : "Saved to cloud history.");
   }
 
   function openHistoryEntry(entry: HistoryEntry) {
@@ -334,7 +458,22 @@ export default function HomePage() {
             </a>
           </nav>
 
-          <div id="history" className="mt-6 hidden rounded-3xl border border-stone-200 bg-white/55 p-4 shadow-sm lg:block">
+          <AccountPanel
+            authMode={authMode}
+            authStatus={authStatus}
+            email={email}
+            password={password}
+            supabaseReady={hasSupabaseConfig()}
+            syncStatus={syncStatus}
+            user={user}
+            onAuthModeChange={setAuthMode}
+            onEmailChange={setEmail}
+            onPasswordChange={setPassword}
+            onSignOut={signOut}
+            onSubmit={handleAuth}
+          />
+
+          <div id="history" className="mt-4 hidden rounded-3xl border border-stone-200 bg-white/55 p-4 shadow-sm lg:block">
             <div className="mb-3 flex items-center justify-between">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">History</p>
               <span className="h-2 w-2 rounded-full bg-stone-300" />
@@ -439,15 +578,13 @@ export default function HomePage() {
               ) : null}
 
               <div className="flex flex-col gap-3 border-t border-stone-100 px-2 pb-1 pt-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-xs text-stone-500">
-                  Assignment Writer analyzes the brief, plans sections, writes them, then humanizes the final draft.
-                </p>
+                <p className="text-xs text-stone-500">{footerForMode(mode)}</p>
                 <button
                   type="submit"
                   disabled={loading}
                   className="inline-flex items-center justify-center rounded-full bg-stone-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {loading ? "Analyzing and writing..." : copy.cta}
+                  {loading ? loadingTextForMode(mode) : copy.cta}
                   <span className="ml-2">→</span>
                 </button>
               </div>
@@ -552,6 +689,115 @@ function inputErrorForMode(mode: Mode): string {
   if (mode === "assignment") return "Paste the assignment brief or describe what you need to write.";
   if (mode === "humanizer") return "Paste text to humanize.";
   return "Describe the presentation you want created.";
+}
+
+function footerForMode(mode: Mode): string {
+  if (mode === "assignment") return "Assignment Writer analyzes the brief, plans sections, writes them, then humanizes the final draft.";
+  if (mode === "humanizer") return "Humanizer rewrites pasted text and returns only the improved version.";
+  return "PowerPoint Creator builds a slide outline first, then exports a `.pptx` deck.";
+}
+
+function loadingTextForMode(mode: Mode): string {
+  if (mode === "assignment") return "Analyzing and writing...";
+  if (mode === "humanizer") return "Humanizing text...";
+  return "Creating slides...";
+}
+
+function AccountPanel({
+  authMode,
+  authStatus,
+  email,
+  password,
+  supabaseReady,
+  syncStatus,
+  user,
+  onAuthModeChange,
+  onEmailChange,
+  onPasswordChange,
+  onSignOut,
+  onSubmit,
+}: {
+  authMode: AuthMode;
+  authStatus: string;
+  email: string;
+  password: string;
+  supabaseReady: boolean;
+  syncStatus: string;
+  user: User | null;
+  onAuthModeChange: (mode: AuthMode) => void;
+  onEmailChange: (value: string) => void;
+  onPasswordChange: (value: string) => void;
+  onSignOut: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <section className="mt-4 rounded-3xl border border-stone-200 bg-white/55 p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Account</p>
+        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${user ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-stone-500"}`}>
+          {user ? "Synced" : "Local"}
+        </span>
+      </div>
+
+      {!supabaseReady ? (
+        <p className="text-xs leading-5 text-stone-500">Add Supabase env vars to enable login and cloud history.</p>
+      ) : user ? (
+        <div className="space-y-3">
+          <div>
+            <p className="truncate text-sm font-medium text-stone-800">{user.email}</p>
+            <p className="mt-1 text-xs leading-5 text-stone-500">{syncStatus || "Cloud history is active."}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onSignOut}
+            className="w-full rounded-full border border-stone-200 bg-white px-3 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
+          >
+            Sign out
+          </button>
+        </div>
+      ) : (
+        <form onSubmit={onSubmit} className="space-y-2">
+          <div className="flex gap-1 rounded-full border border-stone-200 bg-white p-1">
+            <button
+              type="button"
+              onClick={() => onAuthModeChange("sign-in")}
+              className={`flex-1 rounded-full px-2 py-1.5 text-xs font-semibold ${authMode === "sign-in" ? "bg-stone-950 text-white" : "text-stone-500"}`}
+            >
+              Sign in
+            </button>
+            <button
+              type="button"
+              onClick={() => onAuthModeChange("sign-up")}
+              className={`flex-1 rounded-full px-2 py-1.5 text-xs font-semibold ${authMode === "sign-up" ? "bg-stone-950 text-white" : "text-stone-500"}`}
+            >
+              Sign up
+            </button>
+          </div>
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => onEmailChange(event.target.value)}
+            placeholder="Email"
+            className="w-full rounded-2xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400"
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={(event) => onPasswordChange(event.target.value)}
+            placeholder="Password"
+            className="w-full rounded-2xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400"
+          />
+          {authStatus ? <p className="text-xs leading-5 text-stone-500">{authStatus}</p> : null}
+          <button
+            type="submit"
+            className="w-full rounded-full bg-stone-950 px-3 py-2 text-sm font-semibold text-white transition hover:bg-stone-800"
+          >
+            {authMode === "sign-in" ? "Sign in" : "Create account"}
+          </button>
+        </form>
+      )}
+    </section>
+  );
 }
 
 function SidebarButton({
