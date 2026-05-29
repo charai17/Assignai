@@ -10,7 +10,7 @@ export async function GET() {
     ok: true,
     service: config.serviceName,
     provider: config.ai.provider,
-    model: config.ai.provider === "openai" ? config.ai.openaiModel : "mock",
+    model: config.ai.provider === "openrouter" ? config.ai.openRouterModel : "mock",
     time: new Date().toISOString(),
   });
 }
