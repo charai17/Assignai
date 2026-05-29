@@ -24,6 +24,24 @@ type OpenRouterResponse = {
   };
 };
 
+const HUMANIZER_POLICY = `Natural writing policy adapted from blader/humanizer v2.7.0 (MIT). Use it as editing guidance for clarity, voice, and readability, not as a promise to bypass detectors.
+
+Core rules:
+- Preserve the user's meaning, structure, and factual claims.
+- Do not add unsupported claims, fake citations, fake quotes, fake statistics, page numbers, DOI values, URLs, or references.
+- Match the requested tone and academic level. For academic work, stay clear, precise, and appropriately formal.
+- Prefer specific, plain language over inflated significance language such as pivotal, crucial, vital, vibrant, groundbreaking, testament, tapestry, landscape, or showcases.
+- Replace vague attributions such as experts argue, observers suggest, or industry reports with specific cited evidence. If evidence is missing, use a source placeholder.
+- Avoid filler phrases such as in order to, due to the fact that, it is important to note that, at this point in time, and has the ability to.
+- Avoid formulaic constructions: not only X but Y, it is not just X, rule-of-three lists, false from X to Y ranges, and generic upbeat conclusions.
+- Prefer is, are, and has when they are clearer than serves as, stands as, boasts, features, marks, or represents.
+- Remove chatbot artifacts such as great question, certainly, here is, I hope this helps, let me know, and would you like.
+- Use varied sentence length and natural paragraph rhythm. Do not make every paragraph the same shape.
+- Keep headings useful and direct. Avoid title case unless the requested format requires it.
+- Avoid emojis, excessive bold formatting, and decorative punctuation.
+- Do not use em dashes or en dashes in final generated prose. Use commas, periods, colons, or parentheses instead.
+- Keep citation placeholders intact so the user can verify sources before submission.`;
+
 export async function generateResult({ kind, input, payload, requestId }: GenerateRequest): Promise<GenerateResponse> {
   const config = getConfig();
 
@@ -120,8 +138,9 @@ Workflow:
 2. Infer the assignment topic, likely task type, expected citation style, target word count, academic level, and marking priorities.
 3. Break the assignment into logical sections with word-count allocations that add up to the target.
 4. Write the assignment section by section in the planned order.
-5. Humanize the final draft so it reads naturally while staying academic, clear, and suitable for the requested level.
-6. Return the humanized draft and a final checklist.
+5. Apply the natural writing policy to every generated section.
+6. Humanize the final draft so it reads naturally while staying academic, clear, and suitable for the requested level.
+7. Return the humanized draft and a final checklist.
 
 Rules:
 - Do not invent sources, quotes, statistics, page numbers, DOI values, URLs, or references.
@@ -130,14 +149,20 @@ Rules:
 - If the brief does not state word count, use the user's selected word target.
 - Do not expose hidden chain-of-thought. Give concise visible analysis and decisions.
 - Frame the result as an editable draft/study aid, not a guaranteed submission-ready essay.
-- Keep headings clear so the user can revise against the rubric.`;
+- Keep headings clear so the user can revise against the rubric.
+
+${HUMANIZER_POLICY}`;
   }
 
   if (kind === "humanize") {
-    return "You are AssignAI's humanizer. Rewrite text to sound natural and clear while preserving the user's meaning. Do not add unsupported claims or change the factual content.";
+    return `You are AssignAI's humanizer. Rewrite text to sound natural and clear while preserving the user's meaning. Do not add unsupported claims or change the factual content. Return the rewritten text, followed by a short note listing any source or citation gaps the user must verify.
+
+${HUMANIZER_POLICY}`;
   }
 
-  return "You are AssignAI's presentation assistant. Create PowerPoint-ready academic deck outlines with slide titles, concise bullets, suggested visuals, and speaker notes.";
+  return `You are AssignAI's presentation assistant. Create PowerPoint-ready academic deck outlines with slide titles, concise bullets, suggested visuals, and speaker notes. Apply the natural writing policy so slide text is clear, specific, and not padded.
+
+${HUMANIZER_POLICY}`;
 }
 
 function buildUserPrompt(kind: ToolKind, input: string, payload: Record<string, unknown>): string {
@@ -182,7 +207,7 @@ List the order in which sections will be written and the purpose of each section
 Write each section one by one using headings. Respect the section word-count plan as closely as possible. Use citation placeholders when real source details are missing. If the user provided sources or evidence notes, use only those source details and do not invent bibliographic information.
 
 # Humanized Final Draft
-Rewrite the section-by-section draft into a smoother final version. Keep the same argument and evidence. Make the writing sound natural, varied, and human while remaining academic. Keep citation placeholders intact.
+Rewrite the section-by-section draft into a smoother final version using the natural writing policy. Keep the same argument and evidence. Make the writing sound natural, varied, and human while remaining academic. Keep citation placeholders intact.
 
 # Final Checks Before Submission
 Include practical checks for rubric alignment, citations, word count, factual accuracy, source verification, formatting, and personal editing.`;
@@ -190,6 +215,8 @@ Include practical checks for rubric alignment, citations, word count, factual ac
 
   if (kind === "humanize") {
     return `Tone: ${stringValue(payload.tone, "Natural")}
+
+Humanize the text below using the natural writing policy. Keep the meaning intact, keep citations and source placeholders intact, and do not add new facts.
 
 Text:
 ${input}`;
@@ -202,7 +229,7 @@ Audience: ${stringValue(payload.audience, "Academic audience")}
 Slide count: ${stringValue(payload.slideCount, "6")}
 Style: ${stringValue(payload.style, "Academic briefing")}
 
-Return numbered slides. For each slide include: slide title, 3 concise bullets, suggested visual, and speaker notes.`;
+Return numbered slides. For each slide include: slide title, 3 concise bullets, suggested visual, and speaker notes. Apply the natural writing policy to slide text and notes.`;
 }
 
 function normalizeOpenRouterText(raw: OpenRouterResponse): string {
@@ -256,7 +283,7 @@ A stronger assignment should acknowledge complexity. This section can discuss a 
 The conclusion should synthesize the argument rather than repeat each paragraph. It should return to the thesis, summarize the strongest insight, and close with the wider implication.
 
 # Humanized Final Draft
-This assignment explores ${shortTitle(input)} by building a clear argument from the brief, evidence, and marking criteria. The introduction should set up the issue in accessible academic language, define any key terms, and lead into a focused thesis. Each body section should then develop one clear idea at a time, using real evidence where the placeholders appear. The final version should sound natural and confident while still being precise, properly cited, and easy to check against the rubric.
+This assignment explores ${shortTitle(input)} through a clear argument built from the brief, evidence, and marking criteria. The introduction should set up the issue in plain academic language, define key terms, and lead into a focused thesis. Each body section should then develop one idea at a time, using real evidence where the placeholders appear. The final version should sound natural and confident while staying precise, properly cited, and easy to check against the rubric.
 
 # Final Checks Before Submission
 - Replace every citation placeholder with a real source.
@@ -273,7 +300,7 @@ This assignment explores ${shortTitle(input)} by building a clear argument from 
   if (kind === "humanize") {
     return {
       ok: true,
-      result: `${input}\n\nMock note: this is the fallback response. Add OPENROUTER_API_KEY to enable a full humanized rewrite while keeping the original meaning intact.`,
+      result: `${input}\n\nMock note: this fallback keeps the original meaning. Add OPENROUTER_API_KEY to enable the full natural writing policy adapted from blader/humanizer.`,
       raw: { mock: true, kind, requestId },
     };
   }
