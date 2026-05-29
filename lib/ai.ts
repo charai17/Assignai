@@ -113,15 +113,24 @@ export async function generateResult({ kind, input, payload, requestId }: Genera
 
 function systemPromptFor(kind: ToolKind): string {
   if (kind === "assignment") {
-    return `You are AssignAI's Assignment Writer, an academic writing assistant for planning, drafting, and improving a student's own work.
+    return `You are AssignAI's Assignment Writer. Your job is to run a staged academic writing workflow from the user's brief.
+
+Workflow:
+1. Analyze the brief and optional rubric/extra information.
+2. Infer the assignment topic, likely task type, expected citation style, target word count, academic level, and marking priorities.
+3. Break the assignment into logical sections with word-count allocations that add up to the target.
+4. Write the assignment section by section in the planned order.
+5. Humanize the final draft so it reads naturally while staying academic, clear, and suitable for the requested level.
+6. Return the humanized draft and a final checklist.
 
 Rules:
-- Do not invent sources, quotes, statistics, page numbers, or references.
+- Do not invent sources, quotes, statistics, page numbers, DOI values, URLs, or references.
 - If sources are missing, use citation placeholders like [Add source: author/year] and explain what evidence is needed.
-- Keep the user's requested level, subject, tone, and word target in mind.
-- Produce useful work, but make it reviewable and editable rather than pretending it is submission-ready.
-- Avoid academic misconduct language. Frame the result as a draft, plan, or study aid.
-- Make the structure clear enough that a student can revise it against their rubric.`;
+- If the brief does not state citation style, infer a likely style only when there is evidence; otherwise say "not specified" and use neutral placeholders.
+- If the brief does not state word count, use the user's selected word target.
+- Do not expose hidden chain-of-thought. Give concise visible analysis and decisions.
+- Frame the result as an editable draft/study aid, not a guaranteed submission-ready essay.
+- Keep headings clear so the user can revise against the rubric.`;
   }
 
   if (kind === "humanize") {
@@ -133,47 +142,50 @@ Rules:
 
 function buildUserPrompt(kind: ToolKind, input: string, payload: Record<string, unknown>): string {
   if (kind === "assignment") {
-    return `Create an assignment-writing output using the details below.
+    return `Run the full Assignment Writer workflow using the inputs below.
 
-Assignment settings:
-- Level: ${stringValue(payload.level, "College")}
-- Word target: ${stringValue(payload.wordCount, "1000")}
-- Tone: ${stringValue(payload.tone, "Academic")}
-- Subject: ${stringValue(payload.subject, "General")}
-- Citation style: ${stringValue(payload.citationStyle, "Not specified")}
-- Draft type: ${stringValue(payload.draftType, "Full structured draft")}
-
-Assignment brief / user request:
+User prompt / assignment brief:
 ${input}
 
-Rubric or marking notes:
+Optional rubric:
 ${stringValue(payload.rubric, "No rubric provided.")}
 
-User sources / evidence notes:
-${stringValue(payload.sources, "No sources provided. Use placeholders instead of inventing citations.")}
+Optional extra information, sources, evidence notes, or tutor instructions:
+${stringValue(payload.sources, "No extra information provided. Use placeholders instead of inventing citations.")}
+
+User-selected settings:
+- Selected word target: ${stringValue(payload.wordCount, "1000")}
+- Selected citation style: ${stringValue(payload.citationStyle, "Not specified")}
+- Selected academic level: ${stringValue(payload.level, "College")}
+- Selected subject: ${stringValue(payload.subject, "General")}
+- Selected tone: ${stringValue(payload.tone, "Academic")}
+- Selected draft type: ${stringValue(payload.draftType, "Full structured draft")}
 
 Return the result in this exact structure:
 
-# Assignment Brief Analysis
-- Restate the task in plain English.
-- Identify what the marker is likely looking for.
-- List any missing information or source gaps.
+# Brief Analysis
+- What the assignment is about
+- What type of task it is, such as essay, report, reflection, discussion, case study, or literature review
+- Inferred or selected word count
+- Inferred or selected citation style
+- Academic level and subject
+- What the marker is likely looking for
+- Any missing information that affects quality
 
-# Working Thesis
-Write one clear thesis statement. If the prompt is descriptive rather than argumentative, write a controlling focus instead.
+# Section Plan With Word Counts
+Create a section-by-section plan. Include the target word count for each section and make the total equal the assignment word count. Include what each section must do and what evidence is needed.
 
-# Essay Plan
-Create 4-7 sections. For each section include:
-- Purpose
-- Key point
-- Evidence needed
-- Link back to the question
+# Writing Plan
+List the order in which sections will be written and the purpose of each section.
 
-# Draft
-Write a polished draft at the requested level and tone. Use headings. Use citation placeholders where evidence is needed. Do not create a bibliography unless real source details were provided.
+# Section-by-Section Draft
+Write each section one by one using headings. Respect the section word-count plan as closely as possible. Use citation placeholders when real source details are missing. If the user provided sources or evidence notes, use only those source details and do not invent bibliographic information.
 
-# Revision Checklist
-Include 6-8 concrete checks the student should complete before submission, including citations, rubric alignment, factual checking, and personal editing.`;
+# Humanized Final Draft
+Rewrite the section-by-section draft into a smoother final version. Keep the same argument and evidence. Make the writing sound natural, varied, and human while remaining academic. Keep citation placeholders intact.
+
+# Final Checks Before Submission
+Include practical checks for rubric alignment, citations, word count, factual accuracy, source verification, formatting, and personal editing.`;
   }
 
   if (kind === "humanize") {
@@ -199,66 +211,61 @@ function normalizeOpenRouterText(raw: OpenRouterResponse): string {
 
 function mockResult(kind: ToolKind, input: string, payload: Record<string, unknown>, requestId: string): ApiResult {
   if (kind === "assignment") {
+    const target = stringValue(payload.wordCount, "1000");
+    const citation = stringValue(payload.citationStyle, "Not specified");
+
     return {
       ok: true,
-      result: `# Assignment Brief Analysis
-- Task: ${shortTitle(input)}
-- Level: ${stringValue(payload.level, "College")}
-- Marker focus: clear argument, relevant evidence, structure, and accurate citations.
-- Missing information: add your rubric and real source notes for a stronger draft.
+      result: `# Brief Analysis
+- What the assignment is about: ${shortTitle(input)}
+- Task type: essay or structured academic response, based on the current brief.
+- Inferred or selected word count: ${target} words.
+- Inferred or selected citation style: ${citation}.
+- Academic level and subject: ${stringValue(payload.level, "College")} / ${stringValue(payload.subject, "General")}.
+- Marker focus: answer the question directly, use relevant evidence, structure the response clearly, and cite accurately.
+- Missing information: add rubric details and real source notes for a stronger result.
 
-# Working Thesis
-This assignment will argue a clear position on the topic by using evidence from your own sources and linking each section back to the brief.
+# Section Plan With Word Counts
+- Introduction: 10% of the word count. Define the topic, give context, and present the thesis.
+- Main Section 1: 25% of the word count. Develop the first major argument with evidence.
+- Main Section 2: 25% of the word count. Develop the second major argument with evidence.
+- Counterpoint or Evaluation: 25% of the word count. Show critical thinking and evaluate limitations.
+- Conclusion: 15% of the word count. Synthesize the argument and close clearly.
 
-# Essay Plan
+# Writing Plan
+1. Write the introduction after clarifying the thesis.
+2. Write each main section with a clear topic sentence, evidence, analysis, and link back to the brief.
+3. Add a counterpoint or evaluation section to improve critical depth.
+4. Write the conclusion last so it reflects the full argument.
 
-## 1. Introduction
-- Purpose: define the topic and narrow toward the question.
-- Key point: explain why the issue matters.
-- Evidence needed: background source or course reading.
-- Link back: end with the thesis.
-
-## 2. First Main Argument
-- Purpose: develop the strongest supporting point.
-- Key point: connect the first claim to the thesis.
-- Evidence needed: [Add source: author/year].
-- Link back: explain how this answers the question.
-
-## 3. Counterpoint or Complication
-- Purpose: show critical thinking.
-- Key point: acknowledge a limitation, debate, or alternative view.
-- Evidence needed: [Add source: author/year].
-- Link back: show whether this changes the main argument.
-
-## 4. Conclusion
-- Purpose: synthesize, not repeat.
-- Key point: restate the insight in fresh wording.
-- Evidence needed: no new evidence.
-- Link back: close on the broader implication.
-
-# Draft
+# Section-by-Section Draft
 
 ## Introduction
-Introduce the topic, define the key terms, and explain why the assignment question matters. The final sentence should present your working thesis clearly.
+This assignment addresses ${shortTitle(input)}. It should define the central issue, explain why the topic matters, and establish a clear thesis. [Add source: author/year]
 
-## First Main Argument
-Develop your first major point here. Add a properly cited source, explain what it shows, and connect the evidence to the thesis. Avoid dropping in evidence without analysis.
+## Main Section 1
+The first section should develop the strongest supporting point. Begin with a topic sentence, add evidence from a real source, and explain how that evidence supports the argument. [Add source: author/year]
 
-## Counterpoint or Complication
-A stronger assignment usually shows awareness of complexity. Present a credible counterpoint, limitation, or alternative interpretation. Then explain how this affects your argument.
+## Main Section 2
+The second section should build on the argument with another major point. Use evidence carefully and avoid making claims that are not supported by sources. [Add source: author/year]
+
+## Counterpoint or Evaluation
+A stronger assignment should acknowledge complexity. This section can discuss a limitation, alternative interpretation, or counterargument, then explain how it affects the overall thesis. [Add source: author/year]
 
 ## Conclusion
-Return to the thesis, synthesize the strongest evidence, and close with the broader implication of the argument.
+The conclusion should synthesize the argument rather than repeat each paragraph. It should return to the thesis, summarize the strongest insight, and close with the wider implication.
 
-# Revision Checklist
-- Add real citations where placeholders appear.
-- Check the draft against every rubric point.
-- Verify facts, names, dates, and definitions.
-- Make sure each paragraph links back to the question.
-- Remove unsupported claims.
-- Edit the wording so it reflects your own understanding.
-- Format the reference list in the required citation style.
-- Confirm the final word count before submission.`,
+# Humanized Final Draft
+This assignment explores ${shortTitle(input)} by building a clear argument from the brief, evidence, and marking criteria. The introduction should set up the issue in accessible academic language, define any key terms, and lead into a focused thesis. Each body section should then develop one clear idea at a time, using real evidence where the placeholders appear. The final version should sound natural and confident while still being precise, properly cited, and easy to check against the rubric.
+
+# Final Checks Before Submission
+- Replace every citation placeholder with a real source.
+- Check the final structure against the rubric.
+- Confirm the final word count.
+- Verify all facts, dates, names, and definitions.
+- Make sure each paragraph answers the assignment question.
+- Format citations and references in the required style.
+- Edit the final wording so it reflects your own understanding.`,
       raw: { mock: true, kind, requestId },
     };
   }
