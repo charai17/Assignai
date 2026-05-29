@@ -26,6 +26,8 @@ const HISTORY_KEY = "assignai-history";
 const levels = ["High School", "College", "University", "Graduate"];
 const wordCounts = ["500", "750", "1000", "1500", "2000"];
 const assignmentTones = ["Academic", "Analytical", "Persuasive", "Informative", "Professional"];
+const draftTypes = ["Full structured draft", "Detailed outline", "Improve my draft", "Plan only"];
+const citationStyles = ["Not specified", "Harvard", "APA 7", "MLA", "Chicago", "IEEE", "OSCOLA"];
 const humanizerTones = ["Natural", "Conversational", "Professional", "Friendly", "Confident"];
 const subjects = ["General", "English", "History", "Science", "Business", "Technology", "Health"];
 const slideCounts = ["4", "5", "6", "8", "10", "12"];
@@ -36,10 +38,10 @@ const modeCopy: Record<Mode, { label: string; icon: string; eyebrow: string; out
   assignment: {
     label: "Assignment Writer",
     icon: "✍",
-    eyebrow: "AI writing workspace",
+    eyebrow: "Assignment workspace",
     output: "Generated assignment",
     cta: "Generate assignment",
-    placeholder: "Ask for an essay, report, discussion post, or outline. Include topic, rubric notes, required sources, and the argument you want to make...",
+    placeholder: "Paste the assignment question or describe what you need to write. Add your argument if you already have one...",
   },
   humanizer: {
     label: "Humanizer",
@@ -62,6 +64,10 @@ const modeCopy: Record<Mode, { label: string; icon: string; eyebrow: string; out
 export default function HomePage() {
   const [mode, setMode] = useState<Mode>("assignment");
   const [assignmentPrompt, setAssignmentPrompt] = useState("");
+  const [rubric, setRubric] = useState("");
+  const [sources, setSources] = useState("");
+  const [draftType, setDraftType] = useState(draftTypes[0]);
+  const [citationStyle, setCitationStyle] = useState(citationStyles[0]);
   const [level, setLevel] = useState(levels[1]);
   const [wordCount, setWordCount] = useState(wordCounts[2]);
   const [assignmentTone, setAssignmentTone] = useState(assignmentTones[0]);
@@ -226,7 +232,18 @@ export default function HomePage() {
 
   function payloadForMode(currentMode: Mode) {
     if (currentMode === "assignment") {
-      return { input: assignmentPrompt, prompt: assignmentPrompt, level, wordCount: Number(wordCount), tone: assignmentTone, subject };
+      return {
+        input: assignmentPrompt,
+        prompt: assignmentPrompt,
+        rubric,
+        sources,
+        draftType,
+        citationStyle,
+        level,
+        wordCount: Number(wordCount),
+        tone: assignmentTone,
+        subject,
+      };
     }
 
     if (currentMode === "humanizer") {
@@ -331,10 +348,24 @@ export default function HomePage() {
               <div className="grid gap-2 px-2 pb-2 sm:grid-cols-2 lg:grid-cols-4">
                 {mode === "assignment" ? (
                   <>
+                    <SelectField label="Draft type" value={draftType} onChange={setDraftType} options={draftTypes} />
+                    <SelectField label="Citation" value={citationStyle} onChange={setCitationStyle} options={citationStyles} />
                     <SelectField label="Level" value={level} onChange={setLevel} options={levels} />
                     <SelectField label="Words" value={wordCount} onChange={setWordCount} options={wordCounts} />
                     <SelectField label="Tone" value={assignmentTone} onChange={setAssignmentTone} options={assignmentTones} />
                     <SelectField label="Subject" value={subject} onChange={setSubject} options={subjects} />
+                    <TextAreaField
+                      label="Rubric / marking criteria"
+                      value={rubric}
+                      onChange={setRubric}
+                      placeholder="Paste the marking criteria, learning outcomes, or tutor notes here."
+                    />
+                    <TextAreaField
+                      label="Sources / evidence notes"
+                      value={sources}
+                      onChange={setSources}
+                      placeholder="Paste real sources, quotes, readings, links, or evidence notes. If empty, placeholders will be used."
+                    />
                   </>
                 ) : null}
 
@@ -460,7 +491,7 @@ export default function HomePage() {
 }
 
 function inputErrorForMode(mode: Mode): string {
-  if (mode === "assignment") return "Describe the assignment you want generated.";
+  if (mode === "assignment") return "Paste the assignment brief or describe what you need to write.";
   if (mode === "humanizer") return "Paste text to humanize.";
   return "Describe the presentation you want created.";
 }
@@ -533,6 +564,31 @@ function SelectField({
           </option>
         ))}
       </select>
+    </label>
+  );
+}
+
+function TextAreaField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <label className="block rounded-2xl border border-stone-200 bg-white px-3 py-2 shadow-sm lg:col-span-2">
+      <span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-400">{label}</span>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        rows={4}
+        placeholder={placeholder}
+        className="mt-2 w-full resize-y border-0 bg-transparent text-sm leading-6 text-stone-800 outline-none placeholder:text-stone-400"
+      />
     </label>
   );
 }
