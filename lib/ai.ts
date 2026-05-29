@@ -123,7 +123,7 @@ async function generateAssignmentPipeline({
   requestId,
   config,
 }: Omit<GenerateRequest, "kind"> & { config: ReturnType<typeof getConfig> }): Promise<GenerateResponse> {
-  const targetWords = getTargetWordCount(payload);
+  const targetWords = getTargetWordCount(payload, input);
   const lower = Math.ceil(targetWords * 0.9);
   const upper = Math.floor(targetWords * 1.1);
   const sharedContext = assignmentContext(input, payload, targetWords);
@@ -567,11 +567,8 @@ Optional extra information, source notes, evidence, or tutor instructions:
 ${stringValue(payload.sources, "No extra information provided. Use placeholders instead of inventing citations.")}
 
 User-selected settings:
-- Selected word target: ${targetWords}
+- Word target used by AssignAI: ${targetWords}
 - Selected citation style: ${stringValue(payload.citationStyle, "Not specified")}
-- Selected academic level: ${stringValue(payload.level, "College")}
-- Selected subject: ${stringValue(payload.subject, "General")}
-- Selected tone: ${stringValue(payload.tone, "Academic")}
 - Selected draft type: ${stringValue(payload.draftType, "Full structured draft")}`;
 }
 
@@ -599,7 +596,7 @@ ${HUMANIZER_POLICY}`;
 }
 
 function buildUserPrompt(kind: ToolKind, input: string, payload: Record<string, unknown>): string {
-  if (kind === "assignment") return assignmentContext(input, payload, getTargetWordCount(payload));
+  if (kind === "assignment") return assignmentContext(input, payload, getTargetWordCount(payload, input));
 
   if (kind === "humanize") {
     return `Humanize the text below.
@@ -628,7 +625,7 @@ function normalizeChatText(raw: ChatResponse): string {
 
 function mockResult(kind: ToolKind, input: string, payload: Record<string, unknown>, requestId: string): ApiResult {
   if (kind === "assignment") {
-    const target = getTargetWordCount(payload);
+    const target = getTargetWordCount(payload, input);
     const citation = stringValue(payload.citationStyle, "Not specified");
     const introTarget = Math.round(target * 0.1);
     const firstTarget = Math.round(target * 0.25);
@@ -678,7 +675,7 @@ The conclusion should synthesize the argument rather than repeat each paragraph.
 - Task type: essay or structured academic response, based on the current brief.
 - Inferred or selected word count: ${target} words.
 - Inferred or selected citation style: ${citation}.
-- Academic level and subject: ${stringValue(payload.level, "College")} / ${stringValue(payload.subject, "General")}.
+- Academic context: infer level and subject from the brief.
 - Marker focus: answer the question directly, use relevant evidence, structure the response clearly, and cite accurately.
 - Missing information: add rubric details and real source notes for a stronger result.
 
@@ -914,16 +911,33 @@ function stripReferenceBlocks(text: string): string {
   return kept.join("\n");
 }
 
-function getTargetWordCount(payload: Record<string, unknown>): number {
+function getTargetWordCount(payload: Record<string, unknown>, input = ""): number {
   const value = payload.wordCount;
-  const parsed = typeof value === "number"
+  const explicit = typeof value === "number"
     ? value
-    : typeof value === "string"
+    : typeof value === "string" && !/auto/i.test(value)
       ? Number.parseInt(value.replace(/[^0-9]/g, ""), 10)
-      : 1000;
+      : Number.NaN;
+  const parsed = Number.isFinite(explicit) ? explicit : inferWordCountFromBrief(input, payload);
 
   if (!Number.isFinite(parsed)) return 1000;
-  return Math.max(250, Math.min(10000, Math.round(parsed)));
+  return Math.max(250, Math.min(5000, Math.round(parsed)));
+}
+
+function inferWordCountFromBrief(input: string, payload: Record<string, unknown>): number {
+  const text = [
+    input,
+    stringValue(payload.rubric, ""),
+    stringValue(payload.sources, ""),
+  ].join("\n");
+  const matches = Array.from(text.matchAll(/(?:word\s*count|words?|approximately|around|about|max(?:imum)?|limit)\D{0,24}(\d{3,5})|(\d{3,5})\D{0,16}(?:words?|word\s*count)/gi));
+
+  for (const match of matches) {
+    const value = Number.parseInt(match[1] || match[2], 10);
+    if (Number.isFinite(value) && value >= 250 && value <= 5000) return value;
+  }
+
+  return 1000;
 }
 
 function buildWordCountReport(text: string, target: number): WordCountReport {

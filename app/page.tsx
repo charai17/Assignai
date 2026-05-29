@@ -43,13 +43,10 @@ type GenerationRow = {
 };
 
 const HISTORY_KEY = "assignai-history";
-const levels = ["High School", "College", "University", "Graduate"];
-const wordCounts = ["500", "750", "1000", "1500", "2000"];
-const assignmentTones = ["Academic", "Analytical", "Persuasive", "Informative", "Professional"];
+const wordCounts = ["Auto-detect", "500", "750", "1000", "1500", "2000", "3000", "4000", "5000"];
 const draftTypes = ["Full staged draft", "Detailed plan only", "Improve my draft", "Section plan + draft"];
 const citationStyles = ["Auto-detect", "Harvard", "APA 7", "MLA", "Chicago", "IEEE", "OSCOLA"];
 const humanizerTones = ["Natural", "Conversational", "Professional", "Friendly", "Confident"];
-const subjects = ["General", "English", "History", "Science", "Business", "Technology", "Health"];
 const slideCounts = ["4", "5", "6", "8", "10", "12"];
 const deckStyles = ["Academic briefing", "Seminar talk", "Research pitch", "Case study", "Client-ready"];
 const audiences = ["Tutor", "Classmates", "Academic panel", "Client", "General audience"];
@@ -89,10 +86,7 @@ export default function HomePage() {
   const [sources, setSources] = useState("");
   const [draftType, setDraftType] = useState(draftTypes[0]);
   const [citationStyle, setCitationStyle] = useState(citationStyles[0]);
-  const [level, setLevel] = useState(levels[1]);
-  const [wordCount, setWordCount] = useState(wordCounts[2]);
-  const [assignmentTone, setAssignmentTone] = useState(assignmentTones[0]);
-  const [subject, setSubject] = useState(subjects[0]);
+  const [wordCount, setWordCount] = useState(wordCounts[0]);
   const [humanizerText, setHumanizerText] = useState("");
   const [humanizerTone, setHumanizerTone] = useState(humanizerTones[0]);
   const [powerpointPrompt, setPowerpointPrompt] = useState("");
@@ -172,24 +166,18 @@ export default function HomePage() {
         citationStyle={citationStyle}
         draftType={draftType}
         landingError={landingError}
-        level={level}
         pdfUploading={pdfUploading}
         pdfUploadStatus={pdfUploadStatus}
         rubric={rubric}
         sources={sources}
-        subject={subject}
-        tone={assignmentTone}
         wordCount={wordCount}
         onCitationStyleChange={setCitationStyle}
         onDraftTypeChange={setDraftType}
         onGenerate={handlePreSignupGenerate}
-        onLevelChange={setLevel}
         onPdfUpload={handlePdfUpload}
         onPromptChange={setAssignmentPrompt}
         onRubricChange={setRubric}
         onSourcesChange={setSources}
-        onSubjectChange={setSubject}
-        onToneChange={setAssignmentTone}
         onWordCountChange={setWordCount}
       />
     );
@@ -552,10 +540,7 @@ export default function HomePage() {
         sources,
         draftType,
         citationStyle,
-        level,
-        wordCount: Number(wordCount),
-        tone: assignmentTone,
-        subject,
+        wordCount,
       };
     }
 
@@ -629,7 +614,6 @@ export default function HomePage() {
 
             <ToolComposer
               assignmentPrompt={assignmentPrompt}
-              assignmentTone={assignmentTone}
               audience={audience}
               citationStyle={citationStyle}
               deckStyle={deckStyle}
@@ -637,7 +621,6 @@ export default function HomePage() {
               error={error}
               humanizerText={humanizerText}
               humanizerTone={humanizerTone}
-              level={level}
               loading={loading}
               mode={mode}
               pdfUploading={pdfUploading}
@@ -646,24 +629,20 @@ export default function HomePage() {
               rubric={rubric}
               slideCount={slideCount}
               sources={sources}
-              subject={subject}
               wordCount={wordCount}
               onAssignmentPromptChange={setAssignmentPrompt}
-              onAssignmentToneChange={setAssignmentTone}
               onAudienceChange={setAudience}
               onCitationStyleChange={setCitationStyle}
               onDeckStyleChange={setDeckStyle}
               onDraftTypeChange={setDraftType}
               onHumanizerTextChange={setHumanizerText}
               onHumanizerToneChange={setHumanizerTone}
-              onLevelChange={setLevel}
               onModeChange={switchMode}
               onPdfUpload={handlePdfUpload}
               onPowerpointPromptChange={setPowerpointPrompt}
               onRubricChange={setRubric}
               onSlideCountChange={setSlideCount}
               onSourcesChange={setSources}
-              onSubjectChange={setSubject}
               onSubmit={handleSubmit}
               onWordCountChange={setWordCount}
             />
@@ -702,24 +681,18 @@ function PreSignupAssignmentPage(props: {
   citationStyle: string;
   draftType: string;
   landingError: string;
-  level: string;
   pdfUploading: boolean;
   pdfUploadStatus: string;
   rubric: string;
   sources: string;
-  subject: string;
-  tone: string;
   wordCount: string;
   onCitationStyleChange: (value: string) => void;
   onDraftTypeChange: (value: string) => void;
   onGenerate: () => void;
-  onLevelChange: (value: string) => void;
   onPdfUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   onPromptChange: (value: string) => void;
   onRubricChange: (value: string) => void;
   onSourcesChange: (value: string) => void;
-  onSubjectChange: (value: string) => void;
-  onToneChange: (value: string) => void;
   onWordCountChange: (value: string) => void;
 }) {
   return (
@@ -755,10 +728,7 @@ function PreSignupAssignmentPage(props: {
               <div className="grid gap-2 px-2 pb-2 sm:grid-cols-2 lg:grid-cols-4">
                 <SelectField label="Draft type" value={props.draftType} onChange={props.onDraftTypeChange} options={draftTypes} />
                 <SelectField label="Citation" value={props.citationStyle} onChange={props.onCitationStyleChange} options={citationStyles} />
-                <SelectField label="Level" value={props.level} onChange={props.onLevelChange} options={levels} />
                 <SelectField label="Words" value={props.wordCount} onChange={props.onWordCountChange} options={wordCounts} />
-                <SelectField label="Tone" value={props.tone} onChange={props.onToneChange} options={assignmentTones} />
-                <SelectField label="Subject" value={props.subject} onChange={props.onSubjectChange} options={subjects} />
                 <TextAreaField label="Rubric / marking criteria" value={props.rubric} onChange={props.onRubricChange} placeholder="Optional: paste marking criteria, learning outcomes, grade descriptors, or tutor notes." />
                 <TextAreaField label="Extra information" value={props.sources} onChange={props.onSourcesChange} placeholder="Optional: paste source notes, required readings, your draft, tutor instructions, preferred argument, or evidence." />
               </div>
@@ -793,7 +763,6 @@ function PreSignupAssignmentPage(props: {
 
 function ToolComposer(props: {
   assignmentPrompt: string;
-  assignmentTone: string;
   audience: string;
   citationStyle: string;
   deckStyle: string;
@@ -801,7 +770,6 @@ function ToolComposer(props: {
   error: string;
   humanizerText: string;
   humanizerTone: string;
-  level: string;
   loading: boolean;
   mode: Mode;
   pdfUploading: boolean;
@@ -810,24 +778,20 @@ function ToolComposer(props: {
   rubric: string;
   slideCount: string;
   sources: string;
-  subject: string;
   wordCount: string;
   onAssignmentPromptChange: (value: string) => void;
-  onAssignmentToneChange: (value: string) => void;
   onAudienceChange: (value: string) => void;
   onCitationStyleChange: (value: string) => void;
   onDeckStyleChange: (value: string) => void;
   onDraftTypeChange: (value: string) => void;
   onHumanizerTextChange: (value: string) => void;
   onHumanizerToneChange: (value: string) => void;
-  onLevelChange: (value: string) => void;
   onModeChange: (mode: Mode) => void;
   onPdfUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   onPowerpointPromptChange: (value: string) => void;
   onRubricChange: (value: string) => void;
   onSlideCountChange: (value: string) => void;
   onSourcesChange: (value: string) => void;
-  onSubjectChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onWordCountChange: (value: string) => void;
 }) {
@@ -863,10 +827,7 @@ function ToolComposer(props: {
           <>
             <SelectField label="Draft type" value={props.draftType} onChange={props.onDraftTypeChange} options={draftTypes} />
             <SelectField label="Citation" value={props.citationStyle} onChange={props.onCitationStyleChange} options={citationStyles} />
-            <SelectField label="Level" value={props.level} onChange={props.onLevelChange} options={levels} />
             <SelectField label="Words" value={props.wordCount} onChange={props.onWordCountChange} options={wordCounts} />
-            <SelectField label="Tone" value={props.assignmentTone} onChange={props.onAssignmentToneChange} options={assignmentTones} />
-            <SelectField label="Subject" value={props.subject} onChange={props.onSubjectChange} options={subjects} />
             <TextAreaField label="Rubric / marking criteria" value={props.rubric} onChange={props.onRubricChange} placeholder="Optional: paste marking criteria, learning outcomes, grade descriptors, or tutor notes." />
             <TextAreaField label="Extra information" value={props.sources} onChange={props.onSourcesChange} placeholder="Optional: paste source notes, required readings, your draft, tutor instructions, preferred argument, or evidence." />
           </>
