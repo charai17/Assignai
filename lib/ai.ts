@@ -144,13 +144,19 @@ Return exactly these sections:
 - Task type, such as essay, report, reflection, case study, discussion, or literature review
 - Selected or inferred word count
 - Selected or inferred citation style
-- Academic level and subject
 - What the marker is likely looking for
 - Missing information that affects quality
 
 # Section Plan With Word Counts
-Create sections with target word counts. The section targets must add up to exactly ${targetWords} words. Use this exact line format for each section:
+Create the actual report/essay sections with target word counts. The section targets must add up to exactly ${targetWords} words. Use this exact line format for each section:
 - Section title: 000 words. Purpose and evidence needed.
+
+Planning rules:
+- Do not create sections for administrative marking criteria such as referencing, structure, spelling, grammar, presentation, or formatting. Those criteria must be integrated across the whole answer.
+- If the brief gives weighted content criteria, convert only the content criteria into report sections.
+- If the brief asks for critical appraisal of two documents, create one content section called "Critical appraisal of two project management documents" and note the two documents as subsections or planned evidence.
+- Use exact names, budgets, dates, constraints, and project labels from the brief when supplied.
+- Do not invent the organisation, industry, team members, software names, statistics, or project facts when they are not supplied.
 
 # Writing Plan
 List the writing order and what each stage must achieve.`,
@@ -176,11 +182,11 @@ Rules:
 - Use markdown headings for every assignment section.
 - Use clear headings that match the section plan.
 - You must write every section in the section plan. Do not stop after the introduction.
-- Use only source details the user supplied. Do not invent books, journal articles, URLs, DOI values, page numbers, quotes, statistics, or named authors.
-- When evidence is needed but the user did not provide a source, use a placeholder like [Add source: author/year for claim about X].
-- At the end of every drafted section, include a short list headed "References used in this section".
-- Each reference list item must either be a real user-provided source detail or a source placeholder.
-- Return only the section-by-section draft.`,
+- Use only details the user supplied. Do not invent the organisation, industry, staff roles, software names, books, journal articles, URLs, DOI values, page numbers, quotes, statistics, or named authors.
+- When evidence is needed but the user did not provide a source, use inline placeholders like [Add source: author/year for claim about X].
+- Do not add "References used in this section" lists.
+- Do not include brief analysis, writing plans, word-count checks, notes to the user, or final checklists.
+- Return only the assignment/report draft.`,
   });
 
   if (!sectionDraft.ok) return assignmentStageError("section drafting", sectionDraft, requestId, config.ai.provider);
@@ -222,11 +228,13 @@ Important:
 - The section draft below has already been checked section by section with code.
 - Preserve the section headings, section balance, citations, and source placeholders.
 - Do not allow humanizing to make any section much longer or shorter.
+- Remove any accidental "References used in this section" blocks.
+- Return a clean assignment/report draft only.
 
 Verified section draft:
 ${verifiedSectionDraft}
 
-Return only the polished final draft. Keep all citation placeholders and real source mentions intact. Do not include a reference list here.`,
+Return only the polished final draft. Keep all citation placeholders and real source mentions intact. Do not include a reference list here, notes, checks, or planning material.`,
   });
 
   if (!humanizedDraft.ok) return assignmentStageError("humanizing", humanizedDraft, requestId, config.ai.provider);
@@ -256,7 +264,8 @@ Rules:
 - If the draft is too short, add useful analysis instead of filler.
 - If the draft is too long, tighten wording without deleting key evidence.
 - Do not add a reference list.
-- Return only the adjusted final draft.
+- Do not add notes, checks, planning material, or "References used in this section" blocks.
+- Return only the adjusted assignment/report draft.
 
 Draft:
 ${finalDraft}`,
@@ -273,34 +282,18 @@ ${finalDraft}`,
     extractReferenceCandidates(`${verifiedSectionDraft}\n\n${finalDraft}`),
     stringValue(payload.citationStyle, "Not specified"),
   );
-  const sectionWordCountSection = formatSectionWordCountReport(sectionVerification.reports);
   const wordCountSection = formatWordCountReport(wordReport, adjusted);
+  const qualityNotice = formatQualityNotice(wordReport, sectionVerification.reports);
 
   return {
     status: 200,
     result: {
       ok: true,
-      result: `${analysis.text.trim()}
-
-# Section-by-Section Draft
-${verifiedSectionDraft.trim()}
-
-# Section Word Count Checks
-${sectionWordCountSection}
-
-# Humanized Final Draft
-${finalDraft.trim()}
+      result: `${qualityNotice}${finalDraft.trim()}
 
 ${references}
 
-${wordCountSection}
-
-# Final Checks Before Submission
-- Replace every citation placeholder with a real source before submitting.
-- Check the final draft against the rubric and marking criteria.
-- Verify facts, names, dates, definitions, statistics, and quotations.
-- Confirm the citation style and reference formatting with your course guidance.
-- Read the draft once yourself and make edits that reflect your own understanding.`,
+${wordCountSection}`,
       raw: {
         requestId,
         provider: config.ai.provider,
@@ -371,9 +364,10 @@ Rules:
 - Start with a markdown heading that matches the missing section title.
 - Aim for the target word count.
 - Use only source details the user supplied.
-- Do not invent books, journal articles, URLs, DOI values, page numbers, quotes, statistics, or named authors.
+- Do not invent project facts, organisations, industries, staff roles, software names, books, journal articles, URLs, DOI values, page numbers, quotes, statistics, or named authors.
 - If evidence is needed but no source details were supplied, use placeholders like [Add source: author/year for claim about X].
-- End with a short list headed "References used in this section".`,
+- Do not add a "References used in this section" list.
+- Return only this section.`,
     });
 
     if (generated.ok && generated.text) {
@@ -446,10 +440,10 @@ Rules:
 - Rewrite only this section.
 - Preserve the section heading.
 - Preserve the argument, citations, and source placeholders.
-- Keep or recreate the "References used in this section" list at the end.
 - If it is too short, add useful analysis tied to the brief and rubric.
 - If it is too long, tighten wording without removing required evidence.
 - Do not add unrelated sections.
+- Do not add a "References used in this section" list.
 - Return only this section.
 
 Section to rewrite:
@@ -547,11 +541,14 @@ Your job is to help create an editable academic draft from the user's brief. Be 
 
 Rules:
 - Do not invent sources, quotes, statistics, page numbers, DOI values, URLs, or references.
+- Do not invent project facts, organisations, industries, people, software names, budgets, dates, or outcomes. Use supplied details only.
 - If sources are missing, use precise placeholders like [Add source: author/year for claim about X].
 - If citation style is not specified, say not specified and keep references as placeholders.
 - Do not expose hidden chain-of-thought. Give concise visible reasoning, decisions, and output.
 - Keep the result as a draft/study aid the user must review, source, and edit before submission.
 - Keep headings clear and practical.
+- For assignment/report output, return the student's deliverable, not the pipeline plan.
+- Never turn marking criteria like referencing, structure, spelling, grammar, presentation, or formatting into standalone report sections.
 
 ${HUMANIZER_POLICY}`;
 }
@@ -742,7 +739,7 @@ function extractSectionTargets(analysis: string, totalTarget: number): SectionTa
     if (!match) continue;
     const title = match[1].replace(/^#+\s*/, "").trim();
     const target = Number.parseInt(match[2], 10);
-    if (/selected|inferred|word count|citation style|academic level|marker|missing information/i.test(title)) continue;
+    if (isNonContentSectionTitle(title)) continue;
     if (title && Number.isFinite(target) && target > 0) targets.push({ title, target });
   }
 
@@ -888,6 +885,10 @@ function extractSection(text: string, heading: string): string {
   return captured.join("\n").trim();
 }
 
+function isNonContentSectionTitle(title: string): boolean {
+  return /selected|inferred|word count|citation style|academic level|marker|missing information|references?|referencing|structure|spelling|grammar|formatting|presentation/i.test(title);
+}
+
 function stripReferenceBlocks(text: string): string {
   const kept: string[] = [];
   let inReferenceBlock = false;
@@ -948,6 +949,17 @@ function buildWordCountReport(text: string, target: number): WordCountReport {
   return { target, lower, upper, actual, withinRange: actual >= lower && actual <= upper };
 }
 
+function formatQualityNotice(wordReport: WordCountReport, sectionReports: SectionWordReport[]): string {
+  const failedSections = sectionReports.filter((report) => !report.withinRange);
+  if (wordReport.withinRange && !failedSections.length) return "";
+
+  const sectionText = failedSections.length
+    ? ` Section checks still need review for: ${failedSections.map((report) => report.title).join(", ")}.`
+    : "";
+
+  return `> Draft quality notice: the generated draft did not fully satisfy the code word-count checks. Target ${wordReport.target}, accepted ${wordReport.lower}-${wordReport.upper}, counted ${wordReport.actual}.${sectionText}\n\n`;
+}
+
 function countWords(text: string): number {
   const withoutUrls = text.replace(/https?:\/\/\S+/g, " ");
   return withoutUrls.match(/[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)*/g)?.length ?? 0;
@@ -973,7 +985,7 @@ function formatWordCountReport(report: WordCountReport, adjusted: boolean): stri
 - Code-counted final draft words: ${report.actual}
 - Status: ${status}
 - Automatic final adjustment used: ${adjusted ? "Yes" : "No"}
-- Counting method: code counts words in the Humanized Final Draft only, excluding analysis, section plan, references, and checklist.`;
+- Counting method: code counts words in the final report draft only, excluding references and this word-count note.`;
 }
 
 function extractReferenceCandidates(text: string): string[] {
