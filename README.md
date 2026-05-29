@@ -43,6 +43,16 @@ Tables:
 - `generations`: saved input/output records.
 - `usage_events`: usage tracking for future credits and billing.
 
+## AI Provider
+
+AssignAI can call OpenAI directly or use OpenRouter as a fallback.
+
+- If `OPENAI_API_KEY` is set, the backend uses OpenAI directly.
+- The default direct OpenAI model is `gpt-4.1`.
+- If `OPENAI_API_KEY` is missing but `OPENROUTER_API_KEY` is set, the backend uses OpenRouter.
+- If no AI key is set, the backend uses mock output so the UI can still be tested.
+- `AI_PROVIDER` can force `openai`, `openrouter`, or `mock` when the matching key is present.
+
 ## Assignment Writer Pipeline
 
 1. User enters the assignment brief as the main prompt.
@@ -66,7 +76,7 @@ The word counter is deterministic code, not an AI guess. Section checks count ea
 2. User pastes the original text into the input box.
 3. User selects a tone such as Natural, Conversational, Professional, Friendly, or Confident.
 4. The UI sends the text to `POST /api/humanize`.
-5. The backend calls OpenRouter with the natural writing policy adapted from `blader/humanizer`.
+5. The backend calls OpenAI GPT-4.1 directly when `OPENAI_API_KEY` is set, or OpenRouter when only `OPENROUTER_API_KEY` is set.
 6. The response returns only the humanized text, with no labels, notes, scores, or extra commentary.
 7. The user can edit the humanized output, copy it, download it as text, or export it as `.docx`.
 
@@ -104,6 +114,9 @@ http://localhost:3000
 ## Environment
 
 ```env
+AI_PROVIDER=
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openai/gpt-4.1-mini
 NEXT_PUBLIC_SUPABASE_URL=
@@ -122,7 +135,7 @@ RATE_LIMIT_MAX_REQUESTS=20
 1. Run the Supabase schema in SQL Editor.
 2. Enable Email and Google auth in Supabase.
 3. Add local and Vercel URLs to Supabase auth redirect settings.
-4. Add OpenRouter and Supabase env vars to Vercel.
+4. Add OpenAI, optional OpenRouter fallback, and Supabase env vars to Vercel.
 5. Deploy the PR to a preview environment.
 6. Test Google sign-up, email sign-up, all three tools, saved history, DOCX export, and PPTX export.
 
