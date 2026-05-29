@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase";
 
@@ -14,6 +14,15 @@ type ApiResponse = {
   text?: string;
   error?: string;
   message?: string;
+};
+
+type PdfUploadResponse = {
+  ok?: boolean;
+  text?: string;
+  filename?: string;
+  pages?: number;
+  truncated?: boolean;
+  error?: string;
 };
 
 type HistoryEntry = {
@@ -100,6 +109,8 @@ export default function HomePage() {
   const [output, setOutput] = useState("");
   const [error, setError] = useState("");
   const [landingError, setLandingError] = useState("");
+  const [pdfUploadStatus, setPdfUploadStatus] = useState("");
+  const [pdfUploading, setPdfUploading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -162,6 +173,8 @@ export default function HomePage() {
         draftType={draftType}
         landingError={landingError}
         level={level}
+        pdfUploading={pdfUploading}
+        pdfUploadStatus={pdfUploadStatus}
         rubric={rubric}
         sources={sources}
         subject={subject}
@@ -171,6 +184,7 @@ export default function HomePage() {
         onDraftTypeChange={setDraftType}
         onGenerate={handlePreSignupGenerate}
         onLevelChange={setLevel}
+        onPdfUpload={handlePdfUpload}
         onPromptChange={setAssignmentPrompt}
         onRubricChange={setRubric}
         onSourcesChange={setSources}
@@ -214,6 +228,44 @@ export default function HomePage() {
     setLandingError("");
     setAuthMode("sign-up");
     document.getElementById("signup")?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  async function handlePdfUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    if (file.type && file.type !== "application/pdf") {
+      setPdfUploadStatus("Upload a PDF file.");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+    setPdfUploading(true);
+    setPdfUploadStatus(`Reading ${file.name}...`);
+
+    try {
+      const response = await fetch("/api/upload/pdf", {
+        method: "POST",
+        body: formData,
+      });
+      const data = (await response.json()) as PdfUploadResponse;
+
+      if (!response.ok || !data.ok || !data.text) {
+        setPdfUploadStatus(data.error || "I could not read that PDF.");
+        return;
+      }
+
+      const extracted = `PDF upload: ${data.filename || file.name}${data.pages ? ` (${data.pages} pages)` : ""}\n\n${data.text}`;
+      setAssignmentPrompt((current) => current.trim() ? `${current.trim()}\n\n${extracted}` : extracted);
+      setMode("assignment");
+      setPdfUploadStatus(data.truncated ? "PDF text added. Long file was shortened to fit the prompt limit." : "PDF text added to the assignment brief.");
+    } catch {
+      setPdfUploadStatus("PDF upload failed. Try a smaller text-based PDF.");
+    } finally {
+      setPdfUploading(false);
+    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -588,6 +640,8 @@ export default function HomePage() {
               level={level}
               loading={loading}
               mode={mode}
+              pdfUploading={pdfUploading}
+              pdfUploadStatus={pdfUploadStatus}
               powerpointPrompt={powerpointPrompt}
               rubric={rubric}
               slideCount={slideCount}
@@ -604,6 +658,7 @@ export default function HomePage() {
               onHumanizerToneChange={setHumanizerTone}
               onLevelChange={setLevel}
               onModeChange={switchMode}
+              onPdfUpload={handlePdfUpload}
               onPowerpointPromptChange={setPowerpointPrompt}
               onRubricChange={setRubric}
               onSlideCountChange={setSlideCount}
@@ -648,6 +703,8 @@ function PreSignupAssignmentPage(props: {
   draftType: string;
   landingError: string;
   level: string;
+  pdfUploading: boolean;
+  pdfUploadStatus: string;
   rubric: string;
   sources: string;
   subject: string;
@@ -657,6 +714,7 @@ function PreSignupAssignmentPage(props: {
   onDraftTypeChange: (value: string) => void;
   onGenerate: () => void;
   onLevelChange: (value: string) => void;
+  onPdfUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   onPromptChange: (value: string) => void;
   onRubricChange: (value: string) => void;
   onSourcesChange: (value: string) => void;
@@ -687,6 +745,8 @@ function PreSignupAssignmentPage(props: {
             </p>
 
             <section className="mt-8 rounded-[2rem] border border-stone-200 bg-[#fffdf8] p-3 shadow-[0_24px_80px_rgba(68,53,35,0.10)]">
+              <PdfUploadField onUpload={props.onPdfUpload} uploading={props.pdfUploading} status={props.pdfUploadStatus} />
+
               <label className="block px-1 pt-2">
                 <span className="sr-only">Assignment brief</span>
                 <textarea value={props.assignmentPrompt} onChange={(event) => props.onPromptChange(event.target.value)} rows={8} placeholder={modeCopy.assignment.placeholder} className="min-h-[14rem] w-full resize-y rounded-[1.5rem] border-0 bg-transparent px-4 py-4 text-base leading-7 text-stone-900 outline-none placeholder:text-stone-400" />
@@ -744,6 +804,8 @@ function ToolComposer(props: {
   level: string;
   loading: boolean;
   mode: Mode;
+  pdfUploading: boolean;
+  pdfUploadStatus: string;
   powerpointPrompt: string;
   rubric: string;
   slideCount: string;
@@ -760,6 +822,7 @@ function ToolComposer(props: {
   onHumanizerToneChange: (value: string) => void;
   onLevelChange: (value: string) => void;
   onModeChange: (mode: Mode) => void;
+  onPdfUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   onPowerpointPromptChange: (value: string) => void;
   onRubricChange: (value: string) => void;
   onSlideCountChange: (value: string) => void;
@@ -777,6 +840,8 @@ function ToolComposer(props: {
           <ModePill key={item} active={props.mode === item} onClick={() => props.onModeChange(item)}>{modeCopy[item].label}</ModePill>
         ))}
       </div>
+
+      {props.mode === "assignment" ? <PdfUploadField onUpload={props.onPdfUpload} uploading={props.pdfUploading} status={props.pdfUploadStatus} /> : null}
 
       <label className="block px-1 pt-3">
         <span className="sr-only">{copy.label} prompt</span>
@@ -956,6 +1021,24 @@ function loadingTextForMode(mode: Mode): string {
 
 function SidebarButton({ active, icon, label, onClick }: { active: boolean; icon: string; label: string; onClick: () => void }) {
   return <button type="button" onClick={onClick} className={`flex min-w-max items-center gap-3 rounded-2xl border px-3 py-2.5 text-left text-sm transition lg:w-full ${active ? "border-stone-200 bg-white text-stone-950 shadow-sm" : "border-transparent text-stone-600 hover:bg-white/75 hover:text-stone-950"}`}><span className="flex h-6 w-6 items-center justify-center rounded-full bg-stone-100 text-xs font-bold">{icon}</span><span className="font-medium">{label}</span></button>;
+}
+
+function PdfUploadField({ onUpload, uploading, status }: { onUpload: (event: ChangeEvent<HTMLInputElement>) => void; uploading: boolean; status: string }) {
+  return (
+    <div className="mx-2 mt-2 rounded-2xl border border-dashed border-stone-200 bg-white/75 px-4 py-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-stone-800">Upload assignment brief PDF</p>
+          <p className="mt-1 text-xs leading-5 text-stone-500">Text-based PDFs are added into the brief box automatically.</p>
+        </div>
+        <label className={`inline-flex cursor-pointer items-center justify-center rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 shadow-sm transition hover:border-stone-300 hover:bg-stone-50 ${uploading ? "pointer-events-none opacity-60" : ""}`}>
+          {uploading ? "Reading PDF..." : "Choose PDF"}
+          <input type="file" accept="application/pdf,.pdf" onChange={onUpload} disabled={uploading} className="sr-only" />
+        </label>
+      </div>
+      {status ? <p className="mt-2 text-xs leading-5 text-stone-500">{status}</p> : null}
+    </div>
+  );
 }
 
 function ModePill({ active, children, onClick }: { active: boolean; children: string; onClick: () => void }) {
