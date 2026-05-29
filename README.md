@@ -6,18 +6,42 @@ AssignAI is a focused writing and presentation studio with three tools:
 - Humanizer: takes pasted text and returns a cleaner, more natural version while preserving meaning.
 - PowerPoint Creator: turns a topic into a slide-by-slide outline and exports a `.pptx` deck.
 
-The app now starts with an Assignment Writer pre-sign-up screen. Visitors can fill in the brief, rubric, word count, citation style, and extra notes first. When they click Generate, AssignAI sends them to sign up so the generated work can be saved to their workspace.
+The app starts with an Assignment Writer pre-sign-up screen. Visitors fill in the brief first. When they click Generate, AssignAI sends them to sign up with Google or email so the generated work can be saved.
 
 ## Product Flow
 
 1. Visitors land directly on the Assignment Writer form.
 2. They paste the assignment brief and optionally add rubric, citation style, word count, subject, tone, and extra notes.
 3. Clicking Generate before sign-up scrolls the visitor to the account creation section.
-4. After sign-up or sign-in, the user enters the full studio.
-5. Signed-in users get Supabase cloud history.
+4. The user signs up with Google or email.
+5. Signed-in users enter the full studio and get Supabase cloud history.
 6. Every signed-in generation creates a project, generation record, and usage event.
 7. Users can reopen saved outputs from the sidebar.
 8. Outputs can be edited, copied, downloaded as text, exported as DOCX, or exported as PPTX for presentations.
+
+## Supabase Auth
+
+Supabase is used for Google auth, email auth, projects, saved generations, and usage events.
+
+1. In Supabase, go to SQL Editor and run `supabase/schema.sql`.
+2. In Authentication > Providers, enable Email.
+3. In Authentication > Providers, enable Google and add the Google OAuth client details.
+4. In Authentication > URL Configuration, add your local and deployed URLs.
+5. Add these env vars to `.env.local` and Vercel:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-or-publishable-key
+```
+
+Google sign-in uses Supabase OAuth with `redirectTo: window.location.origin`, so the deployed domain must be allowed in Supabase URL Configuration.
+
+Tables:
+
+- `profiles`: one profile per Supabase auth user.
+- `projects`: one saved project shell per generation.
+- `generations`: saved input/output records.
+- `usage_events`: usage tracking for future credits and billing.
 
 ## Assignment Writer Flow
 
@@ -41,40 +65,9 @@ The app now starts with an Assignment Writer pre-sign-up screen. Visitors can fi
 6. The response returns only the humanized text, with no labels, notes, scores, or extra commentary.
 7. The user can edit the humanized output, copy it, download it as text, or export it as `.docx`.
 
-## Supabase Auth and History
-
-Supabase is used for accounts, projects, saved generations, and usage events.
-
-1. Create or open a Supabase project.
-2. In Supabase, go to SQL Editor.
-3. Paste and run `supabase/schema.sql`.
-4. In Authentication > Providers, enable Email.
-5. In Authentication > URL Configuration, add your local and deployed URLs.
-6. Add these env vars to `.env.local` and Vercel:
-
-```env
-NEXT_PUBLIC_SUPABASE_URL=https://your-project-ref.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-or-publishable-key
-```
-
-Tables:
-
-- `profiles`: one profile per Supabase auth user.
-- `projects`: one saved project shell per generation.
-- `generations`: saved input/output records.
-- `usage_events`: usage tracking for future credits and billing.
-
 ## Humanizer Policy
 
 The backend includes a natural writing policy adapted from [`blader/humanizer`](https://github.com/blader/humanizer), which is MIT licensed. It is used as prompt guidance for Assignment Writer, Humanizer, and PowerPoint outputs.
-
-The policy focuses on:
-
-- preserving meaning and factual claims;
-- avoiding fabricated sources, quotes, statistics, URLs, DOI values, and references;
-- replacing inflated or vague wording with clearer language;
-- removing chatbot artifacts, filler phrases, generic conclusions, and decorative formatting;
-- keeping academic writing precise while making sentence rhythm more natural.
 
 AssignAI uses this as an editing quality layer, not as a guarantee against AI detection. Users still need to verify sources, citations, facts, and whether the work follows their institution's rules.
 
@@ -88,14 +81,6 @@ POST /api/powerpoint
 POST /api/powerpoint/download
 GET  /api/health
 ```
-
-Text generation routes return JSON shaped as:
-
-```json
-{ "ok": true, "result": "Generated text" }
-```
-
-The document route returns a `.docx` file, and the PowerPoint route returns a `.pptx` file.
 
 ## Run Locally
 
@@ -130,18 +115,12 @@ RATE_LIMIT_MAX_REQUESTS=20
 ## Deployment Checklist
 
 1. Run the Supabase schema in SQL Editor.
-2. Enable Email auth in Supabase.
+2. Enable Email and Google auth in Supabase.
 3. Add local and Vercel URLs to Supabase auth redirect settings.
 4. Add OpenRouter and Supabase env vars to Vercel.
 5. Deploy the PR to a preview environment.
-6. Test sign up, sign in, all three tools, saved history, DOCX export, and PPTX export.
+6. Test Google sign-up, email sign-up, all three tools, saved history, DOCX export, and PPTX export.
 
 ## Product Notes
 
 AssignAI should remain a drafting and study-support tool. Generated content must be reviewed, fact-checked, and cited before use in academic work.
-
-## Next Up
-
-- Credit limits and payment plans.
-- Project folders and richer document naming.
-- Editable PowerPoint themes and document templates.
