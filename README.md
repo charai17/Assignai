@@ -20,6 +20,20 @@ The UI is built with Next.js, React, TypeScript, and Tailwind CSS. The backend i
 8. It humanizes the final draft while keeping the academic meaning and citation placeholders intact.
 9. The user edits the result in-app, then exports text or `.docx`.
 
+## Humanizer Policy
+
+The backend includes a natural writing policy adapted from [`blader/humanizer`](https://github.com/blader/humanizer), which is MIT licensed. It is used as prompt guidance for Assignment Writer, Humanizer, and PowerPoint outputs.
+
+The policy focuses on:
+
+- preserving meaning and factual claims;
+- avoiding fabricated sources, quotes, statistics, URLs, DOI values, and references;
+- replacing inflated or vague wording with clearer language;
+- removing chatbot artifacts, filler phrases, generic conclusions, and decorative formatting;
+- keeping academic writing precise while making sentence rhythm more natural.
+
+AssignAI uses this as an editing quality layer, not as a guarantee against AI detection. Users still need to verify sources, citations, facts, and whether the work follows their institution's rules.
+
 ## How It Works
 
 1. The user chooses Assignment Writer, Humanizer, or PowerPoint Creator.
