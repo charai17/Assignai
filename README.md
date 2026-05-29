@@ -4,9 +4,18 @@ AssignAI is a focused writing and presentation studio with three tools:
 
 - Assignment Writer: creates structured academic drafts from a prompt, level, word target, tone, and subject.
 - Humanizer: rewrites stiff text so it reads more naturally while preserving meaning.
-- PowerPoint Creator: turns a topic into a slide-by-slide outline with bullets, visuals, and speaker notes.
+- PowerPoint Creator: turns a topic into a slide-by-slide outline and exports a `.pptx` deck.
 
 The UI is built with Next.js, React, TypeScript, and Tailwind CSS. The backend is owned by the app directly and routes generation through OpenRouter when a key is configured.
+
+## How It Works
+
+1. The user chooses Assignment Writer, Humanizer, or PowerPoint Creator.
+2. The UI sends the prompt and settings to the matching API route.
+3. The backend validates input, rate-limits requests, and calls OpenRouter.
+4. If no OpenRouter key is configured, mock output is returned so the UI can still be tested.
+5. Outputs are saved in browser history using local storage.
+6. PowerPoint mode can export a real `.pptx` through `/api/powerpoint/download`.
 
 ## Run Locally
 
@@ -30,16 +39,17 @@ The app exposes these routes:
 POST /api/assignment
 POST /api/humanize
 POST /api/powerpoint
+POST /api/powerpoint/download
 GET  /api/health
 ```
 
-All generation routes return JSON shaped as:
+Text generation routes return JSON shaped as:
 
 ```json
 { "ok": true, "result": "Generated text" }
 ```
 
-If `OPENROUTER_API_KEY` is not configured, the backend returns useful mock output so the UI can still be tested.
+The PowerPoint download route returns a `.pptx` file.
 
 ## Environment
 
@@ -61,6 +71,6 @@ AssignAI should remain a drafting and study-support tool. Generated content must
 
 ## Next Up
 
-- Saved project history and user accounts.
-- True `.pptx` file export after the slide-outline flow is validated.
+- Real accounts and cloud-saved project history.
+- Editable PowerPoint themes and document templates.
 - Credits, payments, and usage limits before public launch.
