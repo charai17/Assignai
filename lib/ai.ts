@@ -49,6 +49,22 @@ type WordCountReport = {
   withinRange: boolean;
 };
 
+type SectionTarget = {
+  title: string;
+  target: number;
+};
+
+type DraftSection = {
+  title: string;
+  content: string;
+};
+
+type SectionWordReport = WordCountReport & {
+  title: string;
+  attempts: number;
+  adjusted: boolean;
+};
+
 const HUMANIZER_POLICY = `Natural writing policy adapted from blader/humanizer v2.7.0 (MIT). Use it as editing guidance for clarity, voice, and readability, not as a promise to bypass detectors.
 
 Core rules:
@@ -142,7 +158,8 @@ Return exactly these sections:
 - Missing information that affects quality
 
 # Section Plan With Word Counts
-Create sections with target word counts. The section targets must add up to exactly ${targetWords} words. Include each section's purpose and evidence needed.
+Create sections with target word counts. The section targets must add up to exactly ${targetWords} words. Use this exact line format for each section:
+- Section title: 000 words. Purpose and evidence needed.
 
 # Writing Plan
 List the writing order and what each stage must achieve.`,
@@ -165,7 +182,8 @@ Stage 2: Write the assignment section by section.
 
 Rules:
 - Follow the section plan and word counts as closely as possible.
-- Use clear headings.
+- Use markdown headings for every assignment section.
+- Use clear headings that match the section plan.
 - Use only source details the user supplied. Do not invent books, journal articles, URLs, DOI values, page numbers, quotes, statistics, or named authors.
 - When evidence is needed but the user did not provide a source, use a placeholder like [Add source: author/year for claim about X].
 - At the end of every drafted section, include a short list headed "References used in this section".
@@ -175,6 +193,17 @@ Rules:
 
   if (!sectionDraft.ok) return assignmentStageError("section drafting", sectionDraft, requestId, config.ai.provider);
 
+  const sectionTargets = extractSectionTargets(analysis.text, targetWords);
+  const sectionVerification = await verifySectionWordCounts({
+    config,
+    requestId,
+    sharedContext,
+    analysis: analysis.text,
+    sectionDraft: sectionDraft.text,
+    sectionTargets,
+  });
+  const verifiedSectionDraft = sectionVerification.draft;
+
   const humanizedDraft = await callOpenRouter({
     config,
     requestId,
@@ -183,13 +212,18 @@ Rules:
     system: assignmentPipelineSystem("humanize"),
     prompt: `${sharedContext}
 
-Stage 3: Humanize and polish the section draft into one coherent final draft.
+Stage 4: Humanize and polish the verified section draft into one coherent final draft.
 
 Target word count: ${targetWords}
-Accepted code-counted range: ${lower} to ${upper} words
+Accepted code-counted range for the full draft: ${lower} to ${upper} words
 
-Section draft:
-${sectionDraft.text}
+Important:
+- The section draft below has already been checked section by section with code.
+- Preserve the section headings, section balance, citations, and source placeholders.
+- Do not allow humanizing to make any section much longer or shorter.
+
+Verified section draft:
+${verifiedSectionDraft}
 
 Return only the polished final draft. Keep all citation placeholders and real source mentions intact. Do not include a reference list here.`,
   });
@@ -204,12 +238,12 @@ Return only the polished final draft. Keep all citation placeholders and real so
     const adjustment = await callOpenRouter({
       config,
       requestId,
-      stage: "word-count-adjustment",
+      stage: "final-word-count-adjustment",
       temperature: 0.25,
-      system: assignmentPipelineSystem("adjustment"),
+      system: assignmentPipelineSystem("final adjustment"),
       prompt: `${sharedContext}
 
-Stage 4: Adjust this final draft so the code-counted word count lands between ${lower} and ${upper} words.
+Stage 5: Adjust this final draft so the code-counted total word count lands between ${lower} and ${upper} words.
 
 Current code-counted words: ${wordReport.actual}
 Target words: ${targetWords}
@@ -217,6 +251,7 @@ Accepted range: ${lower} to ${upper}
 
 Rules:
 - Preserve the argument, section headings, citations, and source placeholders.
+- Keep section proportions close to the verified section draft.
 - If the draft is too short, add useful analysis instead of filler.
 - If the draft is too long, tighten wording without deleting key evidence.
 - Do not add a reference list.
@@ -234,9 +269,10 @@ ${finalDraft}`,
   }
 
   const references = formatAlphabetizedReferences(
-    extractReferenceCandidates(`${sectionDraft.text}\n\n${finalDraft}`),
+    extractReferenceCandidates(`${verifiedSectionDraft}\n\n${finalDraft}`),
     stringValue(payload.citationStyle, "Not specified"),
   );
+  const sectionWordCountSection = formatSectionWordCountReport(sectionVerification.reports);
   const wordCountSection = formatWordCountReport(wordReport, adjusted);
 
   return {
@@ -246,7 +282,10 @@ ${finalDraft}`,
       result: `${analysis.text.trim()}
 
 # Section-by-Section Draft
-${sectionDraft.text.trim()}
+${verifiedSectionDraft.trim()}
+
+# Section Word Count Checks
+${sectionWordCountSection}
 
 # Humanized Final Draft
 ${finalDraft.trim()}
@@ -265,10 +304,102 @@ ${wordCountSection}
         requestId,
         provider: config.ai.provider,
         model: config.ai.openRouterModel,
-        pipeline: ["analysis", "section-draft", "humanize-draft", adjusted ? "word-count-adjustment" : "word-count-check", "reference-sort"],
+        pipeline: [
+          "analysis",
+          "section-draft",
+          "section-word-count-check",
+          sectionVerification.adjustedCount > 0 ? "section-rewrite-loop" : "section-check-pass",
+          "humanize-draft",
+          adjusted ? "final-word-count-adjustment" : "final-word-count-check",
+          "reference-sort",
+        ],
         wordCount: wordReport,
+        sectionWordCounts: sectionVerification.reports,
       },
     },
+  };
+}
+
+async function verifySectionWordCounts({
+  config,
+  requestId,
+  sharedContext,
+  analysis,
+  sectionDraft,
+  sectionTargets,
+}: {
+  config: ReturnType<typeof getConfig>;
+  requestId: string;
+  sharedContext: string;
+  analysis: string;
+  sectionDraft: string;
+  sectionTargets: SectionTarget[];
+}): Promise<{ draft: string; reports: SectionWordReport[]; adjustedCount: number }> {
+  const sections = splitDraftSections(sectionDraft);
+  const sourceSections = sections.length ? sections : [{ title: "Assignment Draft", content: sectionDraft }];
+  const targets = alignSectionTargets(sourceSections, sectionTargets);
+  const verified: DraftSection[] = [];
+  const reports: SectionWordReport[] = [];
+  let adjustedCount = 0;
+
+  for (let index = 0; index < sourceSections.length; index += 1) {
+    const original = sourceSections[index];
+    const target = targets[index] || { title: original.title, target: Math.max(250, Math.round(getTotalTarget(sectionTargets) / sourceSections.length)) };
+    let section = original;
+    let report = buildWordCountReport(stripReferenceBlocks(section.content), target.target);
+    let attempts = 0;
+    let adjusted = false;
+
+    while (!report.withinRange && attempts < 2) {
+      attempts += 1;
+      const rewrite = await callOpenRouter({
+        config,
+        requestId,
+        stage: `section-word-count-rewrite-${index + 1}-${attempts}`,
+        temperature: 0.25,
+        system: assignmentPipelineSystem("section word-count rewrite"),
+        prompt: `${sharedContext}
+
+Stage 3: Rewrite one assignment section so its own code-counted word count is within 10%.
+
+Approved analysis and plan:
+${analysis}
+
+Section title: ${target.title}
+Target for this section: ${target.target} words
+Accepted range for this section: ${report.lower} to ${report.upper} words
+Current code-counted section words: ${report.actual}
+Rewrite attempt: ${attempts} of 2
+
+Rules:
+- Rewrite only this section.
+- Preserve the section heading.
+- Preserve the argument, citations, and source placeholders.
+- Keep or recreate the "References used in this section" list at the end.
+- If it is too short, add useful analysis tied to the brief and rubric.
+- If it is too long, tighten wording without removing required evidence.
+- Do not add unrelated sections.
+- Return only this section.
+
+Section to rewrite:
+${section.content}`,
+      });
+
+      if (!rewrite.ok || !rewrite.text) break;
+      section = normalizeRewrittenSection(rewrite.text, target.title);
+      report = buildWordCountReport(stripReferenceBlocks(section.content), target.target);
+      adjusted = true;
+    }
+
+    if (adjusted) adjustedCount += 1;
+    verified.push(section);
+    reports.push({ title: target.title, ...report, attempts, adjusted });
+  }
+
+  return {
+    draft: verified.map((section) => section.content.trim()).join("\n\n"),
+    reports,
+    adjustedCount,
   };
 }
 
@@ -446,6 +577,11 @@ function mockResult(kind: ToolKind, input: string, payload: Record<string, unkno
   if (kind === "assignment") {
     const target = getTargetWordCount(payload);
     const citation = stringValue(payload.citationStyle, "Not specified");
+    const introTarget = Math.round(target * 0.1);
+    const firstTarget = Math.round(target * 0.25);
+    const secondTarget = Math.round(target * 0.25);
+    const evaluationTarget = Math.round(target * 0.25);
+    const conclusionTarget = target - introTarget - firstTarget - secondTarget - evaluationTarget;
     const draft = `## Introduction
 This assignment addresses ${shortTitle(input)}. It should define the central issue, explain why the topic matters, and establish a clear thesis. [Add source: author/year for background evidence]
 
@@ -474,6 +610,13 @@ References used in this section
 The conclusion should synthesize the argument rather than repeat each paragraph. It should return to the thesis, summarize the strongest insight, and close with the wider implication.`;
     const finalDraft = `This assignment explores ${shortTitle(input)} through a clear argument built from the brief, evidence, and marking criteria. The introduction should set up the issue in plain academic language, define key terms, and lead into a focused thesis. Each body section should then develop one idea at a time, using real evidence where the placeholders appear. The final version should sound natural and confident while staying precise, properly cited, and easy to check against the rubric.`;
     const wordReport = buildWordCountReport(finalDraft, target);
+    const sectionReports = [
+      { title: "Introduction", ...buildWordCountReport("This assignment addresses the topic and sets up the thesis.", introTarget), attempts: 0, adjusted: false },
+      { title: "Main Section 1", ...buildWordCountReport("This section develops the first argument with evidence and explanation.", firstTarget), attempts: 0, adjusted: false },
+      { title: "Main Section 2", ...buildWordCountReport("This section develops the second argument with evidence and explanation.", secondTarget), attempts: 0, adjusted: false },
+      { title: "Counterpoint or Evaluation", ...buildWordCountReport("This section evaluates complexity and addresses a limitation or counterpoint.", evaluationTarget), attempts: 0, adjusted: false },
+      { title: "Conclusion", ...buildWordCountReport("This section synthesizes the argument and closes the assignment.", conclusionTarget), attempts: 0, adjusted: false },
+    ];
 
     return {
       ok: true,
@@ -487,21 +630,26 @@ The conclusion should synthesize the argument rather than repeat each paragraph.
 - Missing information: add rubric details and real source notes for a stronger result.
 
 # Section Plan With Word Counts
-- Introduction: ${Math.round(target * 0.1)} words. Define the topic, give context, and present the thesis.
-- Main Section 1: ${Math.round(target * 0.25)} words. Develop the first major argument with evidence.
-- Main Section 2: ${Math.round(target * 0.25)} words. Develop the second major argument with evidence.
-- Counterpoint or Evaluation: ${Math.round(target * 0.25)} words. Show critical thinking and evaluate limitations.
-- Conclusion: ${target - Math.round(target * 0.1) - Math.round(target * 0.25) - Math.round(target * 0.25) - Math.round(target * 0.25)} words. Synthesize the argument and close clearly.
+- Introduction: ${introTarget} words. Define the topic, give context, and present the thesis.
+- Main Section 1: ${firstTarget} words. Develop the first major argument with evidence.
+- Main Section 2: ${secondTarget} words. Develop the second major argument with evidence.
+- Counterpoint or Evaluation: ${evaluationTarget} words. Show critical thinking and evaluate limitations.
+- Conclusion: ${conclusionTarget} words. Synthesize the argument and close clearly.
 
 # Writing Plan
 1. Analyze the brief and rubric.
 2. Draft each section using the section word count targets.
-3. Humanize the final draft while preserving citations and placeholders.
-4. Sort the extracted references alphabetically.
-5. Run the code-based word count check.
+3. Check every section with code before humanizing.
+4. Rewrite any section that is outside its 10% range.
+5. Humanize the verified draft while preserving citations and placeholders.
+6. Sort the extracted references alphabetically.
+7. Run the code-based final word count check.
 
 # Section-by-Section Draft
 ${draft}
+
+# Section Word Count Checks
+${formatSectionWordCountReport(sectionReports)}
 
 # Humanized Final Draft
 ${finalDraft}
@@ -517,7 +665,7 @@ ${formatWordCountReport(wordReport, false)}
 - Make sure each paragraph answers the assignment question.
 - Format citations and references in the required style.
 - Edit the final wording so it reflects your own understanding.`,
-      raw: { mock: true, kind, requestId, wordCount: wordReport },
+      raw: { mock: true, kind, requestId, wordCount: wordReport, sectionWordCounts: sectionReports },
     };
   }
 
@@ -534,6 +682,150 @@ ${formatWordCountReport(wordReport, false)}
     result: `Mock PowerPoint outline\n\nSlide 1: ${shortTitle(input)}\n- Introduce the topic\n- State the central argument\n- Preview the structure\nSuggested visual: Clean title slide\nSpeaker notes: Open by explaining why this topic matters.\n\nSlide 2: Context\n- Define key terms\n- Summarize background\n- Identify the debate\nSuggested visual: Timeline or concept map\nSpeaker notes: Give the audience enough context to follow the argument.\n\nSlide 3: Main Evidence\n- Present one core source\n- Explain the finding\n- Link it to your argument\nSuggested visual: Quote, chart, or source card\nSpeaker notes: Focus on analysis rather than reading the slide.\n\nSlide 4: Conclusion\n- Return to the thesis\n- Name the strongest takeaway\n- End with an implication\nSuggested visual: Final summary statement\nSpeaker notes: Close clearly and avoid introducing new material.`,
     raw: { mock: true, kind, requestId },
   };
+}
+
+function extractSectionTargets(analysis: string, totalTarget: number): SectionTarget[] {
+  const targets: SectionTarget[] = [];
+  const sectionPlan = extractSection(analysis, "Section Plan With Word Counts") || analysis;
+
+  for (const line of sectionPlan.split(/\r?\n/)) {
+    const cleaned = line.trim().replace(/^[-*]\s+/, "");
+    const match = cleaned.match(/^(.{2,80}?):\s*(\d{2,5})\s*words?\b/i)
+      || cleaned.match(/^(.{2,80}?)\s*-\s*(\d{2,5})\s*words?\b/i)
+      || cleaned.match(/^(.{2,80}?)\s*\((\d{2,5})\s*words?\)/i);
+
+    if (!match) continue;
+    const title = match[1].replace(/^#+\s*/, "").trim();
+    const target = Number.parseInt(match[2], 10);
+    if (title && Number.isFinite(target) && target > 0) targets.push({ title, target });
+  }
+
+  if (targets.length) return normalizeSectionTargets(targets, totalTarget);
+  return fallbackSectionTargets(totalTarget);
+}
+
+function normalizeSectionTargets(targets: SectionTarget[], totalTarget: number): SectionTarget[] {
+  const total = getTotalTarget(targets);
+  if (!total) return fallbackSectionTargets(totalTarget);
+  if (Math.abs(total - totalTarget) <= Math.max(5, totalTarget * 0.02)) return targets;
+
+  const normalized = targets.map((target) => ({
+    title: target.title,
+    target: Math.max(50, Math.round((target.target / total) * totalTarget)),
+  }));
+  const difference = totalTarget - getTotalTarget(normalized);
+  normalized[normalized.length - 1].target += difference;
+  return normalized;
+}
+
+function fallbackSectionTargets(totalTarget: number): SectionTarget[] {
+  const intro = Math.round(totalTarget * 0.1);
+  const first = Math.round(totalTarget * 0.25);
+  const second = Math.round(totalTarget * 0.25);
+  const evaluation = Math.round(totalTarget * 0.25);
+  const conclusion = totalTarget - intro - first - second - evaluation;
+
+  return [
+    { title: "Introduction", target: intro },
+    { title: "Main Section 1", target: first },
+    { title: "Main Section 2", target: second },
+    { title: "Counterpoint or Evaluation", target: evaluation },
+    { title: "Conclusion", target: conclusion },
+  ];
+}
+
+function splitDraftSections(text: string): DraftSection[] {
+  const lines = text.split(/\r?\n/);
+  const sections: DraftSection[] = [];
+  let currentTitle = "";
+  let currentLines: string[] = [];
+
+  for (const line of lines) {
+    const heading = line.match(/^(#{2,4})\s+(.+)$/);
+    if (heading) {
+      if (currentLines.length) {
+        sections.push({ title: currentTitle || `Section ${sections.length + 1}`, content: currentLines.join("\n").trim() });
+      }
+      currentTitle = heading[2].trim();
+      currentLines = [line];
+      continue;
+    }
+
+    currentLines.push(line);
+  }
+
+  if (currentLines.join("\n").trim()) {
+    sections.push({ title: currentTitle || `Section ${sections.length + 1}`, content: currentLines.join("\n").trim() });
+  }
+
+  return sections.filter((section) => section.content.trim());
+}
+
+function alignSectionTargets(sections: DraftSection[], targets: SectionTarget[]): SectionTarget[] {
+  if (!targets.length) return fallbackSectionTargets(1000).slice(0, sections.length);
+  const unmatched = [...targets];
+
+  return sections.map((section, index) => {
+    const normalizedTitle = normalizeTitle(section.title);
+    const matchedIndex = unmatched.findIndex((target) => titleMatches(normalizedTitle, normalizeTitle(target.title)));
+
+    if (matchedIndex >= 0) {
+      const [matched] = unmatched.splice(matchedIndex, 1);
+      return matched;
+    }
+
+    return targets[index] || { title: section.title, target: Math.max(50, Math.round(getTotalTarget(targets) / sections.length)) };
+  });
+}
+
+function normalizeRewrittenSection(text: string, expectedTitle: string): DraftSection {
+  const trimmed = text.trim();
+  const heading = trimmed.match(/^#{2,4}\s+(.+)$/m);
+  if (heading) return { title: heading[1].trim(), content: trimmed };
+  return { title: expectedTitle, content: `## ${expectedTitle}\n${trimmed}` };
+}
+
+function titleMatches(a: string, b: string): boolean {
+  return a === b || a.includes(b) || b.includes(a);
+}
+
+function normalizeTitle(title: string): string {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function getTotalTarget(targets: SectionTarget[]): number {
+  return targets.reduce((sum, target) => sum + target.target, 0);
+}
+
+function extractSection(text: string, heading: string): string {
+  const pattern = new RegExp(`^#\\s+${escapeRegExp(heading)}\\s*$([\\s\\S]*?)(?=^#\\s+|$)`, "im");
+  return text.match(pattern)?.[1]?.trim() || "";
+}
+
+function stripReferenceBlocks(text: string): string {
+  const kept: string[] = [];
+  let inReferenceBlock = false;
+
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+
+    if (/^(#{1,4}\s*)?(references? used in this section|references?|sources?)\b/i.test(trimmed)) {
+      inReferenceBlock = true;
+      continue;
+    }
+
+    if (inReferenceBlock) {
+      if (!trimmed || /^#{1,4}\s+/.test(trimmed)) {
+        inReferenceBlock = false;
+      } else {
+        continue;
+      }
+    }
+
+    if (!inReferenceBlock) kept.push(line);
+  }
+
+  return kept.join("\n");
 }
 
 function getTargetWordCount(payload: Record<string, unknown>): number {
@@ -567,6 +859,15 @@ function countWords(text: string): number {
   return withoutUrls.match(/[A-Za-z0-9]+(?:['-][A-Za-z0-9]+)*/g)?.length ?? 0;
 }
 
+function formatSectionWordCountReport(reports: SectionWordReport[]): string {
+  if (!reports.length) return "- No section word-count checks were available.";
+
+  return reports.map((report) => {
+    const status = report.withinRange ? "Within 10%" : "Outside 10%";
+    return `- ${report.title}: target ${report.target}, accepted ${report.lower} to ${report.upper}, counted ${report.actual}. Status: ${status}. Rewrite attempts: ${report.attempts}.`;
+  }).join("\n");
+}
+
 function formatWordCountReport(report: WordCountReport, adjusted: boolean): string {
   const status = report.withinRange
     ? "Within 10% of the target word count."
@@ -577,7 +878,7 @@ function formatWordCountReport(report: WordCountReport, adjusted: boolean): stri
 - Accepted range: ${report.lower} to ${report.upper} words
 - Code-counted final draft words: ${report.actual}
 - Status: ${status}
-- Automatic adjustment used: ${adjusted ? "Yes" : "No"}
+- Automatic final adjustment used: ${adjusted ? "Yes" : "No"}
 - Counting method: code counts words in the Humanized Final Draft only, excluding analysis, section plan, references, and checklist.`;
 }
 
@@ -693,4 +994,8 @@ function stringValue(value: unknown, fallback: string): string {
 
 function shortTitle(input: string): string {
   return input.replace(/\s+/g, " ").trim().slice(0, 72) || "Untitled";
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
