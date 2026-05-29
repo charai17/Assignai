@@ -1,11 +1,13 @@
-export type AiProvider = "mock" | "openai";
+export type AiProvider = "mock" | "openrouter";
 
 export type AppConfig = {
   serviceName: string;
   ai: {
     provider: AiProvider;
-    openaiApiKey?: string;
-    openaiModel: string;
+    openRouterApiKey?: string;
+    openRouterModel: string;
+    appUrl?: string;
+    appTitle: string;
     timeoutMs: number;
   };
   limits: {
@@ -19,17 +21,19 @@ const DEFAULT_TIMEOUT_MS = 45_000;
 const DEFAULT_MAX_INPUT_CHARS = 20_000;
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 20;
-const DEFAULT_OPENAI_MODEL = "gpt-4.1-mini";
+const DEFAULT_OPENROUTER_MODEL = "openai/gpt-4.1-mini";
 
 export function getConfig(): AppConfig {
-  const openaiApiKey = optionalEnv("OPENAI_API_KEY");
+  const openRouterApiKey = optionalEnv("OPENROUTER_API_KEY");
 
   return {
     serviceName: process.env.SERVICE_NAME || "assignai",
     ai: {
-      provider: openaiApiKey ? "openai" : "mock",
-      openaiApiKey,
-      openaiModel: optionalEnv("OPENAI_MODEL") || DEFAULT_OPENAI_MODEL,
+      provider: openRouterApiKey ? "openrouter" : "mock",
+      openRouterApiKey,
+      openRouterModel: optionalEnv("OPENROUTER_MODEL") || DEFAULT_OPENROUTER_MODEL,
+      appUrl: optionalEnv("OPENROUTER_APP_URL"),
+      appTitle: optionalEnv("OPENROUTER_APP_TITLE") || "AssignAI",
       timeoutMs: readPositiveInteger("AI_REQUEST_TIMEOUT_MS", DEFAULT_TIMEOUT_MS),
     },
     limits: {
