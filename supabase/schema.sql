@@ -39,10 +39,23 @@ create table if not exists public.usage_events (
   created_at timestamptz not null default now()
 );
 
+create index if not exists projects_user_created_idx on public.projects (user_id, created_at desc);
+create index if not exists generations_user_created_idx on public.generations (user_id, created_at desc);
+create index if not exists generations_project_created_idx on public.generations (project_id, created_at desc);
+create index if not exists usage_events_user_created_idx on public.usage_events (user_id, created_at desc);
+
 alter table public.profiles enable row level security;
 alter table public.projects enable row level security;
 alter table public.generations enable row level security;
 alter table public.usage_events enable row level security;
+
+drop policy if exists "Users can read their own profile" on public.profiles;
+drop policy if exists "Users can update their own profile" on public.profiles;
+drop policy if exists "Users can insert their own profile" on public.profiles;
+drop policy if exists "Users can manage their own projects" on public.projects;
+drop policy if exists "Users can manage their own generations" on public.generations;
+drop policy if exists "Users can read their own usage events" on public.usage_events;
+drop policy if exists "Users can insert their own usage events" on public.usage_events;
 
 create policy "Users can read their own profile"
   on public.profiles for select
@@ -80,7 +93,10 @@ returns trigger as $$
 begin
   insert into public.profiles (id, email, full_name)
   values (new.id, new.email, new.raw_user_meta_data ->> 'full_name')
-  on conflict (id) do nothing;
+  on conflict (id) do update set
+    email = excluded.email,
+    full_name = coalesce(excluded.full_name, public.profiles.full_name),
+    updated_at = now();
 
   return new;
 end;
