@@ -2,7 +2,7 @@
 
 AssignAI is a focused writing and presentation studio with three tools:
 
-- Assignment Writer: analyzes a brief, optional rubric, and extra information, then plans, writes section by section, humanizes, and exports the result.
+- Assignment Writer: analyzes a brief, optional rubric, and extra information, then plans, writes section by section, humanizes, checks word count with code, alphabetizes references, and exports the result.
 - Humanizer: takes pasted text and returns a cleaner, more natural version while preserving meaning.
 - PowerPoint Creator: turns a topic into a slide-by-slide outline and exports a `.pptx` deck.
 
@@ -43,17 +43,20 @@ Tables:
 - `generations`: saved input/output records.
 - `usage_events`: usage tracking for future credits and billing.
 
-## Assignment Writer Flow
+## Assignment Writer Pipeline
 
 1. User enters the assignment brief as the main prompt.
 2. User can optionally add rubric / marking criteria.
 3. User can optionally add extra information such as source notes, required readings, tutor instructions, a preferred argument, or an existing draft.
-4. The AI analyzes what the assignment is about.
-5. It infers or uses the selected word count, citation style, academic level, tone, and subject.
-6. It breaks the assignment into sections with target word counts.
-7. It writes the assignment section by section.
-8. It humanizes the final draft while keeping the academic meaning and citation placeholders intact.
-9. The user edits the result in-app, then exports text or `.docx`.
+4. Stage 1 analyzes the assignment and identifies topic, task type, citation style, academic level, marking priorities, missing information, and target word count.
+5. Stage 1 also creates a section plan with target word counts that add up to the selected assignment word count.
+6. Stage 2 writes the assignment section by section and includes "References used in this section" under each section.
+7. Stage 3 humanizes and polishes the draft while keeping meaning, structure, citations, and placeholders intact.
+8. The backend counts the words in code. If the final draft is outside 10% of the selected target, it sends the draft through an automatic adjustment pass.
+9. The backend extracts reference lines and citation placeholders from the section drafts, deduplicates them, and sorts them alphabetically in an `Alphabetized References` section.
+10. The final output includes `Brief Analysis`, `Section Plan With Word Counts`, `Writing Plan`, `Section-by-Section Draft`, `Humanized Final Draft`, `Alphabetized References`, `Word Count Check`, and `Final Checks Before Submission`.
+
+The word counter is deterministic code, not an AI guess. It counts the words inside the Humanized Final Draft only, excluding the plan, references, and checklist. The status reports whether the final draft is within the accepted 90% to 110% range.
 
 ## Humanizer Flow
 
