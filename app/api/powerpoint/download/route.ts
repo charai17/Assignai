@@ -27,18 +27,25 @@ export async function POST(request: Request) {
     return jsonResult({ ok: false, result: validated.error, raw: { requestId } }, 400, requestId);
   }
 
-  const { result, status } = await generateResult({
-    kind: "powerpoint",
-    input: validated.value.input,
-    payload: validated.value.payload,
-    requestId,
-  });
+  const body = parsed.body as Record<string, unknown>;
+  let deckText = typeof body.deckText === "string" && body.deckText.trim() ? body.deckText.trim() : "";
 
-  if (!result.ok) {
-    return jsonResult(result, status, requestId);
+  if (!deckText) {
+    const { result, status } = await generateResult({
+      kind: "powerpoint",
+      input: validated.value.input,
+      payload: validated.value.payload,
+      requestId,
+    });
+
+    if (!result.ok) {
+      return jsonResult(result, status, requestId);
+    }
+
+    deckText = result.result;
   }
 
-  const slides = parseDeck(result.result, validated.value.input);
+  const slides = parseDeck(deckText, validated.value.input);
   const buffer = await buildPresentation(slides);
 
   return new Response(buffer as BodyInit, {
@@ -144,7 +151,6 @@ async function buildPresentation(slides: DeckSlide[]): Promise<Buffer> {
       bold: true,
       color: "1C1917",
       margin: 0,
-      breakLine: false,
       fit: "shrink",
     });
 
@@ -155,7 +161,6 @@ async function buildPresentation(slides: DeckSlide[]): Promise<Buffer> {
       h: 3.8,
       fill: { color: "FFFFFF" },
       line: { color: "E7E5E4", width: 1 },
-      radius: 0.14,
     });
 
     slide.addText(formatBullets(deckSlide.bullets), {
@@ -166,21 +171,19 @@ async function buildPresentation(slides: DeckSlide[]): Promise<Buffer> {
       fontFace: "Aptos",
       fontSize: 16,
       color: "292524",
-      breakLine: false,
       fit: "shrink",
       valign: "mid",
       bullet: { type: "ul" },
       paraSpaceAfterPt: 10,
     });
 
-    slide.addShape(pptx.ShapeType.roundRect, {
+    slide.addShape(pptx.ShapeType.rect, {
       x: 6.0,
       y: 1.65,
       w: 6.7,
       h: 2.0,
       fill: { color: "F5F5F4" },
       line: { color: "E7E5E4", width: 1 },
-      radius: 0.18,
     });
 
     slide.addText("Suggested visual", {
@@ -217,7 +220,6 @@ async function buildPresentation(slides: DeckSlide[]): Promise<Buffer> {
       fontSize: 12,
       color: "57534E",
       fit: "shrink",
-      breakLine: false,
     });
   });
 
