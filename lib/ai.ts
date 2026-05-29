@@ -155,7 +155,16 @@ ${HUMANIZER_POLICY}`;
   }
 
   if (kind === "humanize") {
-    return `You are AssignAI's humanizer. Rewrite text to sound natural and clear while preserving the user's meaning. Do not add unsupported claims or change the factual content. Return the rewritten text, followed by a short note listing any source or citation gaps the user must verify.
+    return `You are AssignAI's Humanizer. The user will paste text. Return only the humanized version of that text.
+
+Rules:
+- Preserve the original meaning, factual claims, citations, links, names, numbers, and order of ideas.
+- Do not add commentary, headings, explanations, scores, notes, or before/after labels.
+- Do not invent sources, citations, quotations, facts, or examples.
+- Keep the requested tone, but do not make academic text casual unless the user asked for that.
+- If the input contains citations or placeholders, keep them intact.
+- If a sentence is already natural, leave it mostly alone.
+- Return plain text only.
 
 ${HUMANIZER_POLICY}`;
   }
@@ -214,9 +223,11 @@ Include practical checks for rubric alignment, citations, word count, factual ac
   }
 
   if (kind === "humanize") {
-    return `Tone: ${stringValue(payload.tone, "Natural")}
+    return `Humanize the text below.
 
-Humanize the text below using the natural writing policy. Keep the meaning intact, keep citations and source placeholders intact, and do not add new facts.
+Tone: ${stringValue(payload.tone, "Natural")}
+
+Return only the rewritten text. Do not include labels, explanations, notes, summaries, or markdown fences.
 
 Text:
 ${input}`;
@@ -300,7 +311,7 @@ This assignment explores ${shortTitle(input)} through a clear argument built fro
   if (kind === "humanize") {
     return {
       ok: true,
-      result: `${input}\n\nMock note: this fallback keeps the original meaning. Add OPENROUTER_API_KEY to enable the full natural writing policy adapted from blader/humanizer.`,
+      result: humanizeFallback(input),
       raw: { mock: true, kind, requestId },
     };
   }
@@ -310,6 +321,20 @@ This assignment explores ${shortTitle(input)} through a clear argument built fro
     result: `Mock PowerPoint outline\n\nSlide 1: ${shortTitle(input)}\n- Introduce the topic\n- State the central argument\n- Preview the structure\nSuggested visual: Clean title slide\nSpeaker notes: Open by explaining why this topic matters.\n\nSlide 2: Context\n- Define key terms\n- Summarize background\n- Identify the debate\nSuggested visual: Timeline or concept map\nSpeaker notes: Give the audience enough context to follow the argument.\n\nSlide 3: Main Evidence\n- Present one core source\n- Explain the finding\n- Link it to your argument\nSuggested visual: Quote, chart, or source card\nSpeaker notes: Focus on analysis rather than reading the slide.\n\nSlide 4: Conclusion\n- Return to the thesis\n- Name the strongest takeaway\n- End with an implication\nSuggested visual: Final summary statement\nSpeaker notes: Close clearly and avoid introducing new material.`,
     raw: { mock: true, kind, requestId },
   };
+}
+
+function humanizeFallback(input: string): string {
+  return input
+    .replace(/\bIn order to\b/gi, "To")
+    .replace(/\bdue to the fact that\b/gi, "because")
+    .replace(/\bit is important to note that\b/gi, "")
+    .replace(/\bhas the ability to\b/gi, "can")
+    .replace(/\bAdditionally,?\s+/gi, "Also, ")
+    .replace(/\bserves as\b/gi, "is")
+    .replace(/\bstands as\b/gi, "is")
+    .replace(/[—–]/g, ",")
+    .replace(/\s{2,}/g, " ")
+    .trim();
 }
 
 function stringValue(value: unknown, fallback: string): string {
