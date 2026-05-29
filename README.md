@@ -6,7 +6,7 @@ AssignAI is a focused writing and presentation studio with three tools:
 - Humanizer: rewrites stiff text so it reads more naturally while preserving meaning.
 - PowerPoint Creator: turns a topic into a slide-by-slide outline with bullets, visuals, and speaker notes.
 
-The UI is built with Next.js, React, TypeScript, and Tailwind CSS. The backend is now owned by the app directly instead of n8n webhooks.
+The UI is built with Next.js, React, TypeScript, and Tailwind CSS. The backend is owned by the app directly and routes generation through OpenRouter when a key is configured.
 
 ## Run Locally
 
@@ -39,13 +39,15 @@ All generation routes return JSON shaped as:
 { "ok": true, "result": "Generated text" }
 ```
 
-If `OPENAI_API_KEY` is not configured, the backend returns useful mock output so the UI can still be tested.
+If `OPENROUTER_API_KEY` is not configured, the backend returns useful mock output so the UI can still be tested.
 
 ## Environment
 
 ```env
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4.1-mini
+OPENROUTER_API_KEY=
+OPENROUTER_MODEL=openai/gpt-4.1-mini
+OPENROUTER_APP_URL=
+OPENROUTER_APP_TITLE=AssignAI
 SERVICE_NAME=assignai
 AI_REQUEST_TIMEOUT_MS=45000
 MAX_INPUT_CHARS=20000
