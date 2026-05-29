@@ -48,7 +48,7 @@ const audiences = ["Tutor", "Classmates", "Academic panel", "Client", "General a
 const modeCopy: Record<Mode, { label: string; icon: string; eyebrow: string; output: string; cta: string; placeholder: string }> = {
   assignment: {
     label: "Assignment Writer",
-    icon: "✍",
+    icon: "A",
     eyebrow: "Assignment workflow",
     output: "Analyzed, planned, written, humanized",
     cta: "Analyze and write",
@@ -56,15 +56,15 @@ const modeCopy: Record<Mode, { label: string; icon: string; eyebrow: string; out
   },
   humanizer: {
     label: "Humanizer",
-    icon: "✦",
+    icon: "H",
     eyebrow: "Natural rewrite workspace",
     output: "Humanized version",
     cta: "Humanize text",
-    placeholder: "Paste text that feels robotic, stiff, or overly formal. I’ll make it read more naturally without changing the meaning...",
+    placeholder: "Paste text that feels robotic, stiff, or overly formal. I will make it read more naturally without changing the meaning...",
   },
   powerpoint: {
     label: "PowerPoint Creator",
-    icon: "▣",
+    icon: "P",
     eyebrow: "Presentation workspace",
     output: "PowerPoint outline",
     cta: "Create slides",
@@ -75,7 +75,6 @@ const modeCopy: Record<Mode, { label: string; icon: string; eyebrow: string; out
 export default function HomePage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [mode, setMode] = useState<Mode>("assignment");
-  const [studioOpen, setStudioOpen] = useState(false);
   const [assignmentPrompt, setAssignmentPrompt] = useState("");
   const [rubric, setRubric] = useState("");
   const [sources, setSources] = useState("");
@@ -100,6 +99,7 @@ export default function HomePage() {
   const [syncStatus, setSyncStatus] = useState("");
   const [output, setOutput] = useState("");
   const [error, setError] = useState("");
+  const [landingError, setLandingError] = useState("");
   const [loading, setLoading] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
@@ -119,18 +119,12 @@ export default function HomePage() {
 
     supabase.auth.getUser().then(({ data }) => {
       setUser(data.user);
-      if (data.user) {
-        setStudioOpen(true);
-        void loadCloudHistory(data.user.id, supabase);
-      }
+      if (data.user) void loadCloudHistory(data.user.id, supabase);
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
-      if (session?.user) {
-        setStudioOpen(true);
-        void loadCloudHistory(session.user.id, supabase);
-      }
+      if (session?.user) void loadCloudHistory(session.user.id, supabase);
     });
 
     return () => listener.subscription.unsubscribe();
@@ -142,7 +136,7 @@ export default function HomePage() {
     return powerpointPrompt.trim();
   }, [assignmentPrompt, humanizerText, mode, powerpointPrompt]);
 
-  const authProps = {
+  const authProps: AccountPanelProps = {
     authMode,
     authStatus,
     email,
@@ -158,8 +152,43 @@ export default function HomePage() {
     onSubmit: handleAuth,
   };
 
-  if (!studioOpen && !user) {
-    return <LandingPage authProps={authProps} onTry={() => setStudioOpen(true)} />;
+  if (!user) {
+    return (
+      <PreSignupAssignmentPage
+        assignmentPrompt={assignmentPrompt}
+        authProps={authProps}
+        citationStyle={citationStyle}
+        draftType={draftType}
+        landingError={landingError}
+        level={level}
+        rubric={rubric}
+        sources={sources}
+        subject={subject}
+        tone={assignmentTone}
+        wordCount={wordCount}
+        onCitationStyleChange={setCitationStyle}
+        onDraftTypeChange={setDraftType}
+        onGenerate={handlePreSignupGenerate}
+        onLevelChange={setLevel}
+        onPromptChange={setAssignmentPrompt}
+        onRubricChange={setRubric}
+        onSourcesChange={setSources}
+        onSubjectChange={setSubject}
+        onToneChange={setAssignmentTone}
+        onWordCountChange={setWordCount}
+      />
+    );
+  }
+
+  async function handlePreSignupGenerate() {
+    if (!assignmentPrompt.trim()) {
+      setLandingError("Paste your assignment brief first, then create an account to generate it.");
+      return;
+    }
+
+    setLandingError("");
+    setAuthMode("sign-up");
+    document.getElementById("signup")?.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -236,7 +265,6 @@ export default function HomePage() {
     }
 
     setUser(data.user ?? null);
-    setStudioOpen(true);
     setAuthStatus(authMode === "sign-in" ? "Signed in." : "Account created.");
   }
 
@@ -244,8 +272,8 @@ export default function HomePage() {
     if (!supabase) return;
     await supabase.auth.signOut();
     setUser(null);
-    setStudioOpen(false);
-    setSyncStatus("Signed out. Showing this device's history.");
+    setSyncStatus("Signed out.");
+    setOutput("");
     try {
       const saved = window.localStorage.getItem(HISTORY_KEY);
       setHistory(saved ? (JSON.parse(saved) as HistoryEntry[]) : []);
@@ -426,7 +454,6 @@ export default function HomePage() {
   }
 
   function openHistoryEntry(entry: HistoryEntry) {
-    setStudioOpen(true);
     setMode(entry.mode);
     setOutput(entry.output);
     setError("");
@@ -491,12 +518,6 @@ export default function HomePage() {
                 onClick={() => switchMode(item)}
               />
             ))}
-            <a
-              href="#history"
-              className="flex min-w-max items-center gap-3 rounded-2xl border border-transparent px-3 py-2.5 text-sm text-stone-600 transition hover:bg-white hover:text-stone-950 lg:w-full"
-            >
-              <span className="text-base">◷</span>History
-            </a>
           </nav>
 
           <AccountPanel {...authProps} />
@@ -523,7 +544,7 @@ export default function HomePage() {
                 <p className="mb-3 inline-flex rounded-full border border-stone-200 bg-white/65 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-stone-500 shadow-sm">
                   {copy.eyebrow}
                 </p>
-                <h1 className="max-w-2xl text-4xl font-semibold tracking-[-0.04em] text-stone-950 sm:text-5xl">
+                <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-stone-950 sm:text-5xl">
                   Build the work, keep the record.
                 </h1>
                 <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-600 sm:text-base">
@@ -535,181 +556,65 @@ export default function HomePage() {
               </div>
             </header>
 
-            <form onSubmit={handleSubmit} className="rounded-[2rem] border border-stone-200 bg-[#fffdf8] p-3 shadow-[0_24px_80px_rgba(68,53,35,0.10)]">
-              <div className="flex flex-wrap gap-2 border-b border-stone-100 px-2 pb-3 pt-1">
-                {(["assignment", "humanizer", "powerpoint"] as Mode[]).map((item) => (
-                  <ModePill key={item} active={mode === item} onClick={() => switchMode(item)}>
-                    {modeCopy[item].label}
-                  </ModePill>
-                ))}
-              </div>
+            <ToolComposer
+              activeInput={activeInput}
+              assignmentPrompt={assignmentPrompt}
+              assignmentTone={assignmentTone}
+              audience={audience}
+              citationStyle={citationStyle}
+              deckStyle={deckStyle}
+              draftType={draftType}
+              error={error}
+              humanizerText={humanizerText}
+              humanizerTone={humanizerTone}
+              level={level}
+              loading={loading}
+              mode={mode}
+              powerpointPrompt={powerpointPrompt}
+              rubric={rubric}
+              slideCount={slideCount}
+              sources={sources}
+              subject={subject}
+              wordCount={wordCount}
+              onAssignmentPromptChange={setAssignmentPrompt}
+              onAssignmentToneChange={setAssignmentTone}
+              onAudienceChange={setAudience}
+              onCitationStyleChange={setCitationStyle}
+              onDeckStyleChange={setDeckStyle}
+              onDraftTypeChange={setDraftType}
+              onHumanizerTextChange={setHumanizerText}
+              onHumanizerToneChange={setHumanizerTone}
+              onLevelChange={setLevel}
+              onModeChange={switchMode}
+              onPowerpointPromptChange={setPowerpointPrompt}
+              onRubricChange={setRubric}
+              onSlideCountChange={setSlideCount}
+              onSourcesChange={setSources}
+              onSubjectChange={setSubject}
+              onSubmit={handleSubmit}
+              onWordCountChange={setWordCount}
+            />
 
-              <label className="block px-1 pt-3">
-                <span className="sr-only">{copy.label} prompt</span>
-                <textarea
-                  value={mode === "assignment" ? assignmentPrompt : mode === "humanizer" ? humanizerText : powerpointPrompt}
-                  onChange={(event) => {
-                    if (mode === "assignment") setAssignmentPrompt(event.target.value);
-                    if (mode === "humanizer") setHumanizerText(event.target.value);
-                    if (mode === "powerpoint") setPowerpointPrompt(event.target.value);
-                  }}
-                  rows={7}
-                  placeholder={copy.placeholder}
-                  className="min-h-[11rem] w-full resize-none rounded-[1.5rem] border-0 bg-transparent px-4 py-4 text-base leading-7 text-stone-900 outline-none placeholder:text-stone-400"
-                />
-              </label>
+            <OutputEditor
+              activeInput={activeInput}
+              copied={copied}
+              downloading={downloading}
+              loading={loading}
+              mode={mode}
+              output={output}
+              outputTitle={copy.output}
+              onCopy={copyOutput}
+              onDownloadDocument={downloadDocument}
+              onDownloadOutput={downloadOutput}
+              onDownloadPowerPoint={downloadPowerPoint}
+              onOutputChange={setOutput}
+            />
 
-              <div className="grid gap-2 px-2 pb-2 sm:grid-cols-2 lg:grid-cols-4">
-                {mode === "assignment" ? (
-                  <>
-                    <SelectField label="Draft type" value={draftType} onChange={setDraftType} options={draftTypes} />
-                    <SelectField label="Citation" value={citationStyle} onChange={setCitationStyle} options={citationStyles} />
-                    <SelectField label="Level" value={level} onChange={setLevel} options={levels} />
-                    <SelectField label="Words" value={wordCount} onChange={setWordCount} options={wordCounts} />
-                    <SelectField label="Tone" value={assignmentTone} onChange={setAssignmentTone} options={assignmentTones} />
-                    <SelectField label="Subject" value={subject} onChange={setSubject} options={subjects} />
-                    <TextAreaField
-                      label="Rubric / marking criteria"
-                      value={rubric}
-                      onChange={setRubric}
-                      placeholder="Optional: paste marking criteria, learning outcomes, grade descriptors, or tutor notes."
-                    />
-                    <TextAreaField
-                      label="Extra information"
-                      value={sources}
-                      onChange={setSources}
-                      placeholder="Optional: paste source notes, required readings, your draft, tutor instructions, preferred argument, or evidence."
-                    />
-                  </>
-                ) : null}
-
-                {mode === "humanizer" ? (
-                  <>
-                    <SelectField label="Tone" value={humanizerTone} onChange={setHumanizerTone} options={humanizerTones} />
-                    <div className="hidden rounded-2xl border border-dashed border-stone-200 bg-stone-50/60 px-3 py-2 text-xs text-stone-500 sm:block lg:col-span-3">
-                      Paste the original text. The output will only contain the rewritten version.
-                    </div>
-                  </>
-                ) : null}
-
-                {mode === "powerpoint" ? (
-                  <>
-                    <SelectField label="Audience" value={audience} onChange={setAudience} options={audiences} />
-                    <SelectField label="Slides" value={slideCount} onChange={setSlideCount} options={slideCounts} />
-                    <SelectField label="Style" value={deckStyle} onChange={setDeckStyle} options={deckStyles} />
-                    <div className="hidden rounded-2xl border border-dashed border-stone-200 bg-stone-50/60 px-3 py-2 text-xs text-stone-500 lg:block">
-                      Generates an outline first, then exports a `.pptx` deck.
-                    </div>
-                  </>
-                ) : null}
-              </div>
-
-              {error ? (
-                <div className="mx-2 mb-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {error}
-                </div>
-              ) : null}
-
-              <div className="flex flex-col gap-3 border-t border-stone-100 px-2 pb-1 pt-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-xs text-stone-500">{footerForMode(mode)}</p>
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="inline-flex items-center justify-center rounded-full bg-stone-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {loading ? loadingTextForMode(mode) : copy.cta}
-                  <span className="ml-2">→</span>
-                </button>
-              </div>
-            </form>
-
-            <section className="rounded-[2rem] border border-stone-200 bg-[#fffdf8]/90 p-4 shadow-sm sm:p-5">
-              <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Editor</p>
-                  <h2 className="mt-1 text-2xl font-semibold tracking-tight text-stone-950">{copy.output}</h2>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {mode === "powerpoint" ? (
-                    <button
-                      type="button"
-                      onClick={downloadPowerPoint}
-                      disabled={downloading || (!output && !activeInput)}
-                      className="rounded-full border border-stone-900 bg-stone-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      {downloading ? "Building PPTX..." : "Download PPTX"}
-                    </button>
-                  ) : null}
-                  {mode !== "powerpoint" ? (
-                    <button
-                      type="button"
-                      onClick={downloadDocument}
-                      disabled={downloading || !output}
-                      className="rounded-full border border-stone-900 bg-stone-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
-                    >
-                      {downloading ? "Building DOCX..." : "Download DOCX"}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={downloadOutput}
-                    disabled={!output}
-                    className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    Download text
-                  </button>
-                  <button
-                    type="button"
-                    onClick={copyOutput}
-                    disabled={!output}
-                    className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    {copied ? "Copied" : "Copy"}
-                  </button>
-                </div>
-              </div>
-
-              <div className="min-h-[20rem] rounded-[1.5rem] border border-stone-200 bg-white p-5">
-                {loading ? (
-                  <div className="flex h-full min-h-[18rem] flex-col items-center justify-center text-center text-stone-500">
-                    <div className="mb-4 h-9 w-9 animate-spin rounded-full border-2 border-stone-200 border-t-stone-900" />
-                    <p className="font-medium text-stone-800">Creating your result</p>
-                    <p className="mt-1 text-sm">This usually only takes a moment.</p>
-                  </div>
-                ) : output ? (
-                  <textarea
-                    value={output}
-                    onChange={(event) => setOutput(event.target.value)}
-                    rows={24}
-                    spellCheck="true"
-                    className="min-h-[30rem] w-full resize-y border-0 bg-transparent font-sans text-sm leading-7 text-stone-800 outline-none"
-                  />
-                ) : (
-                  <div className="flex h-full min-h-[18rem] flex-col items-center justify-center text-center text-stone-500">
-                    <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-stone-200 bg-[#fbf7ef] text-xl">✦</div>
-                    <p className="font-medium text-stone-800">Your output will appear here.</p>
-                    <p className="mt-2 max-w-sm text-sm">Choose a tool, add your prompt, and review or edit the generated result.</p>
-                  </div>
-                )}
-              </div>
-            </section>
-
-            <section className="rounded-[2rem] border border-amber-200 bg-amber-50/80 p-5 text-sm leading-6 text-amber-950 shadow-sm">
+            <section className="rounded-3xl border border-amber-200 bg-amber-50/80 p-5 text-sm leading-6 text-amber-950 shadow-sm">
               <p className="font-semibold">Academic integrity checklist</p>
               <p className="mt-1 text-amber-900/80">
                 Use AssignAI to plan, draft, and polish. Add your own research, verify claims, and cite any source ideas before submission.
               </p>
-            </section>
-
-            <section className="rounded-[2rem] border border-stone-200 bg-white/55 p-5 shadow-sm lg:hidden">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Saved</p>
-              <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                {history.length > 0 ? (
-                  history.map((entry) => <HistoryButton key={entry.id} entry={entry} onClick={() => openHistoryEntry(entry)} />)
-                ) : (
-                  <HistoryItem title="No saved runs yet" meta="Generated outputs will appear here." />
-                )}
-              </div>
             </section>
           </div>
         </section>
@@ -718,65 +623,335 @@ export default function HomePage() {
   );
 }
 
-function LandingPage({
+function PreSignupAssignmentPage({
+  assignmentPrompt,
   authProps,
-  onTry,
+  citationStyle,
+  draftType,
+  landingError,
+  level,
+  rubric,
+  sources,
+  subject,
+  tone,
+  wordCount,
+  onCitationStyleChange,
+  onDraftTypeChange,
+  onGenerate,
+  onLevelChange,
+  onPromptChange,
+  onRubricChange,
+  onSourcesChange,
+  onSubjectChange,
+  onToneChange,
+  onWordCountChange,
 }: {
+  assignmentPrompt: string;
   authProps: AccountPanelProps;
-  onTry: () => void;
+  citationStyle: string;
+  draftType: string;
+  landingError: string;
+  level: string;
+  rubric: string;
+  sources: string;
+  subject: string;
+  tone: string;
+  wordCount: string;
+  onCitationStyleChange: (value: string) => void;
+  onDraftTypeChange: (value: string) => void;
+  onGenerate: () => void;
+  onLevelChange: (value: string) => void;
+  onPromptChange: (value: string) => void;
+  onRubricChange: (value: string) => void;
+  onSourcesChange: (value: string) => void;
+  onSubjectChange: (value: string) => void;
+  onToneChange: (value: string) => void;
+  onWordCountChange: (value: string) => void;
 }) {
   return (
     <main className="min-h-screen bg-[#f7f1e8] text-stone-950">
       <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-6 sm:px-6 lg:px-8">
         <header className="flex items-center justify-between border-b border-stone-200/80 pb-4">
           <LogoBlock />
-          <button
-            type="button"
-            onClick={onTry}
-            className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 shadow-sm transition hover:border-stone-300 hover:bg-stone-50"
-          >
-            Try without account
-          </button>
+          <a href="#signup" className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 shadow-sm transition hover:border-stone-300 hover:bg-stone-50">
+            Sign up
+          </a>
         </header>
 
-        <section className="grid flex-1 items-center gap-8 py-10 lg:grid-cols-[1.05fr_0.95fr] lg:py-16">
+        <section className="grid flex-1 items-start gap-6 py-8 lg:grid-cols-[minmax(0,1.25fr)_360px] lg:py-12">
           <div>
             <p className="mb-4 inline-flex rounded-full border border-stone-200 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-stone-500 shadow-sm">
-              Assignment writing studio
+              Assignment Writer
             </p>
-            <h1 className="max-w-3xl text-5xl font-semibold tracking-[-0.05em] text-stone-950 sm:text-6xl lg:text-7xl">
-              Write, polish, and present your work in one place.
+            <h1 className="max-w-3xl text-4xl font-semibold tracking-tight text-stone-950 sm:text-6xl">
+              Paste your brief first. Sign up when you are ready to generate.
             </h1>
-            <p className="mt-5 max-w-2xl text-base leading-7 text-stone-600 sm:text-lg">
-              AssignAI turns briefs into structured drafts, rewrites stiff text into clearer prose, and creates PowerPoint-ready outlines with export tools built in.
+            <p className="mt-5 max-w-2xl text-base leading-7 text-stone-600">
+              Start in the Assignment Writer. Add the brief, rubric, word count, citation style, and extra notes. When you click generate, AssignAI takes you to sign up so the result can be saved to your workspace.
             </p>
-            <div className="mt-8 grid gap-3 sm:grid-cols-3">
-              <FeatureTile title="Assignment Writer" body="Brief, rubric, sources, section plan, draft, final checks." />
-              <FeatureTile title="Humanizer" body="Paste text and get a cleaner version back without extra notes." />
-              <FeatureTile title="PowerPoint" body="Generate slide plans and export a real PPTX deck." />
-            </div>
+
+            <section className="mt-8 rounded-[2rem] border border-stone-200 bg-[#fffdf8] p-3 shadow-[0_24px_80px_rgba(68,53,35,0.10)]">
+              <label className="block px-1 pt-2">
+                <span className="sr-only">Assignment brief</span>
+                <textarea
+                  value={assignmentPrompt}
+                  onChange={(event) => onPromptChange(event.target.value)}
+                  rows={8}
+                  placeholder={modeCopy.assignment.placeholder}
+                  className="min-h-[14rem] w-full resize-y rounded-[1.5rem] border-0 bg-transparent px-4 py-4 text-base leading-7 text-stone-900 outline-none placeholder:text-stone-400"
+                />
+              </label>
+
+              <div className="grid gap-2 px-2 pb-2 sm:grid-cols-2 lg:grid-cols-4">
+                <SelectField label="Draft type" value={draftType} onChange={onDraftTypeChange} options={draftTypes} />
+                <SelectField label="Citation" value={citationStyle} onChange={onCitationStyleChange} options={citationStyles} />
+                <SelectField label="Level" value={level} onChange={onLevelChange} options={levels} />
+                <SelectField label="Words" value={wordCount} onChange={onWordCountChange} options={wordCounts} />
+                <SelectField label="Tone" value={tone} onChange={onToneChange} options={assignmentTones} />
+                <SelectField label="Subject" value={subject} onChange={onSubjectChange} options={subjects} />
+                <TextAreaField
+                  label="Rubric / marking criteria"
+                  value={rubric}
+                  onChange={onRubricChange}
+                  placeholder="Optional: paste marking criteria, learning outcomes, grade descriptors, or tutor notes."
+                />
+                <TextAreaField
+                  label="Extra information"
+                  value={sources}
+                  onChange={onSourcesChange}
+                  placeholder="Optional: paste source notes, required readings, your draft, tutor instructions, preferred argument, or evidence."
+                />
+              </div>
+
+              {landingError ? (
+                <div className="mx-2 mb-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {landingError}
+                </div>
+              ) : null}
+
+              <div className="flex flex-col gap-3 border-t border-stone-100 px-2 pb-1 pt-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs text-stone-500">Generate is unlocked after sign up so your work can be saved.</p>
+                <button
+                  type="button"
+                  onClick={onGenerate}
+                  className="inline-flex items-center justify-center rounded-full bg-stone-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800"
+                >
+                  Generate assignment
+                  <span className="ml-2">→</span>
+                </button>
+              </div>
+            </section>
           </div>
 
-          <div className="rounded-[2rem] border border-stone-200 bg-[#fffdf8] p-4 shadow-[0_24px_80px_rgba(68,53,35,0.12)] sm:p-5">
+          <aside id="signup" className="rounded-[2rem] border border-stone-200 bg-[#fffdf8] p-4 shadow-[0_24px_80px_rgba(68,53,35,0.12)] sm:p-5 lg:sticky lg:top-6">
             <div className="mb-5 rounded-3xl bg-stone-950 p-5 text-white">
-              <p className="text-sm font-semibold text-stone-200">Start free</p>
-              <h2 className="mt-2 text-3xl font-semibold tracking-tight">Create your workspace</h2>
+              <p className="text-sm font-semibold text-stone-200">Create workspace</p>
+              <h2 className="mt-2 text-3xl font-semibold tracking-tight">Save your generated work</h2>
               <p className="mt-3 text-sm leading-6 text-stone-300">
-                Sign up to save assignments, humanized drafts, and presentations to your cloud history.
+                Sign up to generate the assignment and keep drafts, humanized text, and presentations in cloud history.
               </p>
             </div>
             <AccountPanel {...authProps} compact />
-            <button
-              type="button"
-              onClick={onTry}
-              className="mt-3 w-full rounded-full border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
-            >
-              Continue without saving
-            </button>
-          </div>
+          </aside>
         </section>
       </div>
     </main>
+  );
+}
+
+function ToolComposer(props: {
+  activeInput: string;
+  assignmentPrompt: string;
+  assignmentTone: string;
+  audience: string;
+  citationStyle: string;
+  deckStyle: string;
+  draftType: string;
+  error: string;
+  humanizerText: string;
+  humanizerTone: string;
+  level: string;
+  loading: boolean;
+  mode: Mode;
+  powerpointPrompt: string;
+  rubric: string;
+  slideCount: string;
+  sources: string;
+  subject: string;
+  wordCount: string;
+  onAssignmentPromptChange: (value: string) => void;
+  onAssignmentToneChange: (value: string) => void;
+  onAudienceChange: (value: string) => void;
+  onCitationStyleChange: (value: string) => void;
+  onDeckStyleChange: (value: string) => void;
+  onDraftTypeChange: (value: string) => void;
+  onHumanizerTextChange: (value: string) => void;
+  onHumanizerToneChange: (value: string) => void;
+  onLevelChange: (value: string) => void;
+  onModeChange: (mode: Mode) => void;
+  onPowerpointPromptChange: (value: string) => void;
+  onRubricChange: (value: string) => void;
+  onSlideCountChange: (value: string) => void;
+  onSourcesChange: (value: string) => void;
+  onSubjectChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onWordCountChange: (value: string) => void;
+}) {
+  const copy = modeCopy[props.mode];
+
+  return (
+    <form onSubmit={props.onSubmit} className="rounded-[2rem] border border-stone-200 bg-[#fffdf8] p-3 shadow-[0_24px_80px_rgba(68,53,35,0.10)]">
+      <div className="flex flex-wrap gap-2 border-b border-stone-100 px-2 pb-3 pt-1">
+        {(["assignment", "humanizer", "powerpoint"] as Mode[]).map((item) => (
+          <ModePill key={item} active={props.mode === item} onClick={() => props.onModeChange(item)}>
+            {modeCopy[item].label}
+          </ModePill>
+        ))}
+      </div>
+
+      <label className="block px-1 pt-3">
+        <span className="sr-only">{copy.label} prompt</span>
+        <textarea
+          value={props.mode === "assignment" ? props.assignmentPrompt : props.mode === "humanizer" ? props.humanizerText : props.powerpointPrompt}
+          onChange={(event) => {
+            if (props.mode === "assignment") props.onAssignmentPromptChange(event.target.value);
+            if (props.mode === "humanizer") props.onHumanizerTextChange(event.target.value);
+            if (props.mode === "powerpoint") props.onPowerpointPromptChange(event.target.value);
+          }}
+          rows={7}
+          placeholder={copy.placeholder}
+          className="min-h-[11rem] w-full resize-y rounded-[1.5rem] border-0 bg-transparent px-4 py-4 text-base leading-7 text-stone-900 outline-none placeholder:text-stone-400"
+        />
+      </label>
+
+      <div className="grid gap-2 px-2 pb-2 sm:grid-cols-2 lg:grid-cols-4">
+        {props.mode === "assignment" ? (
+          <>
+            <SelectField label="Draft type" value={props.draftType} onChange={props.onDraftTypeChange} options={draftTypes} />
+            <SelectField label="Citation" value={props.citationStyle} onChange={props.onCitationStyleChange} options={citationStyles} />
+            <SelectField label="Level" value={props.level} onChange={props.onLevelChange} options={levels} />
+            <SelectField label="Words" value={props.wordCount} onChange={props.onWordCountChange} options={wordCounts} />
+            <SelectField label="Tone" value={props.assignmentTone} onChange={props.onAssignmentToneChange} options={assignmentTones} />
+            <SelectField label="Subject" value={props.subject} onChange={props.onSubjectChange} options={subjects} />
+            <TextAreaField label="Rubric / marking criteria" value={props.rubric} onChange={props.onRubricChange} placeholder="Optional: paste marking criteria, learning outcomes, grade descriptors, or tutor notes." />
+            <TextAreaField label="Extra information" value={props.sources} onChange={props.onSourcesChange} placeholder="Optional: paste source notes, required readings, your draft, tutor instructions, preferred argument, or evidence." />
+          </>
+        ) : null}
+
+        {props.mode === "humanizer" ? (
+          <>
+            <SelectField label="Tone" value={props.humanizerTone} onChange={props.onHumanizerToneChange} options={humanizerTones} />
+            <div className="hidden rounded-2xl border border-dashed border-stone-200 bg-stone-50/60 px-3 py-2 text-xs text-stone-500 sm:block lg:col-span-3">
+              Paste the original text. The output will only contain the rewritten version.
+            </div>
+          </>
+        ) : null}
+
+        {props.mode === "powerpoint" ? (
+          <>
+            <SelectField label="Audience" value={props.audience} onChange={props.onAudienceChange} options={audiences} />
+            <SelectField label="Slides" value={props.slideCount} onChange={props.onSlideCountChange} options={slideCounts} />
+            <SelectField label="Style" value={props.deckStyle} onChange={props.onDeckStyleChange} options={deckStyles} />
+            <div className="hidden rounded-2xl border border-dashed border-stone-200 bg-stone-50/60 px-3 py-2 text-xs text-stone-500 lg:block">
+              Generates an outline first, then exports a `.pptx` deck.
+            </div>
+          </>
+        ) : null}
+      </div>
+
+      {props.error ? (
+        <div className="mx-2 mb-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          {props.error}
+        </div>
+      ) : null}
+
+      <div className="flex flex-col gap-3 border-t border-stone-100 px-2 pb-1 pt-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs text-stone-500">{footerForMode(props.mode)}</p>
+        <button
+          type="submit"
+          disabled={props.loading}
+          className="inline-flex items-center justify-center rounded-full bg-stone-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {props.loading ? loadingTextForMode(props.mode) : copy.cta}
+          <span className="ml-2">→</span>
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function OutputEditor({
+  activeInput,
+  copied,
+  downloading,
+  loading,
+  mode,
+  output,
+  outputTitle,
+  onCopy,
+  onDownloadDocument,
+  onDownloadOutput,
+  onDownloadPowerPoint,
+  onOutputChange,
+}: {
+  activeInput: string;
+  copied: boolean;
+  downloading: boolean;
+  loading: boolean;
+  mode: Mode;
+  output: string;
+  outputTitle: string;
+  onCopy: () => void;
+  onDownloadDocument: () => void;
+  onDownloadOutput: () => void;
+  onDownloadPowerPoint: () => void;
+  onOutputChange: (value: string) => void;
+}) {
+  return (
+    <section className="rounded-[2rem] border border-stone-200 bg-[#fffdf8]/90 p-4 shadow-sm sm:p-5">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Editor</p>
+          <h2 className="mt-1 text-2xl font-semibold tracking-tight text-stone-950">{outputTitle}</h2>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {mode === "powerpoint" ? (
+            <button type="button" onClick={onDownloadPowerPoint} disabled={downloading || (!output && !activeInput)} className="rounded-full border border-stone-900 bg-stone-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40">
+              {downloading ? "Building PPTX..." : "Download PPTX"}
+            </button>
+          ) : null}
+          {mode !== "powerpoint" ? (
+            <button type="button" onClick={onDownloadDocument} disabled={downloading || !output} className="rounded-full border border-stone-900 bg-stone-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40">
+              {downloading ? "Building DOCX..." : "Download DOCX"}
+            </button>
+          ) : null}
+          <button type="button" onClick={onDownloadOutput} disabled={!output} className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40">
+            Download text
+          </button>
+          <button type="button" onClick={onCopy} disabled={!output} className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40">
+            {copied ? "Copied" : "Copy"}
+          </button>
+        </div>
+      </div>
+
+      <div className="min-h-[20rem] rounded-[1.5rem] border border-stone-200 bg-white p-5">
+        {loading ? (
+          <div className="flex h-full min-h-[18rem] flex-col items-center justify-center text-center text-stone-500">
+            <div className="mb-4 h-9 w-9 animate-spin rounded-full border-2 border-stone-200 border-t-stone-900" />
+            <p className="font-medium text-stone-800">Creating your result</p>
+            <p className="mt-1 text-sm">This usually only takes a moment.</p>
+          </div>
+        ) : output ? (
+          <textarea value={output} onChange={(event) => onOutputChange(event.target.value)} rows={24} spellCheck="true" className="min-h-[30rem] w-full resize-y border-0 bg-transparent font-sans text-sm leading-7 text-stone-800 outline-none" />
+        ) : (
+          <div className="flex h-full min-h-[18rem] flex-col items-center justify-center text-center text-stone-500">
+            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-stone-200 bg-[#fbf7ef] text-xl">AI</div>
+            <p className="font-medium text-stone-800">Your output will appear here.</p>
+            <p className="mt-2 max-w-sm text-sm">Choose a tool, add your prompt, and review or edit the generated result.</p>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -819,7 +994,7 @@ function AccountPanel({
         <div className="mb-3 flex items-center justify-between gap-3">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Account</p>
           <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${user ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-stone-500"}`}>
-            {user ? "Synced" : "Local"}
+            {user ? "Synced" : "Locked"}
           </span>
         </div>
       ) : null}
@@ -832,52 +1007,24 @@ function AccountPanel({
             <p className="truncate text-sm font-medium text-stone-800">{user.email}</p>
             <p className="mt-1 text-xs leading-5 text-stone-500">{syncStatus || "Cloud history is active."}</p>
           </div>
-          <button
-            type="button"
-            onClick={onSignOut}
-            className="w-full rounded-full border border-stone-200 bg-white px-3 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
-          >
+          <button type="button" onClick={onSignOut} className="w-full rounded-full border border-stone-200 bg-white px-3 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50">
             Sign out
           </button>
         </div>
       ) : (
         <form onSubmit={onSubmit} className="space-y-2">
           <div className="flex gap-1 rounded-full border border-stone-200 bg-white p-1">
-            <button
-              type="button"
-              onClick={() => onAuthModeChange("sign-up")}
-              className={`flex-1 rounded-full px-2 py-1.5 text-xs font-semibold ${authMode === "sign-up" ? "bg-stone-950 text-white" : "text-stone-500"}`}
-            >
+            <button type="button" onClick={() => onAuthModeChange("sign-up")} className={`flex-1 rounded-full px-2 py-1.5 text-xs font-semibold ${authMode === "sign-up" ? "bg-stone-950 text-white" : "text-stone-500"}`}>
               Sign up
             </button>
-            <button
-              type="button"
-              onClick={() => onAuthModeChange("sign-in")}
-              className={`flex-1 rounded-full px-2 py-1.5 text-xs font-semibold ${authMode === "sign-in" ? "bg-stone-950 text-white" : "text-stone-500"}`}
-            >
+            <button type="button" onClick={() => onAuthModeChange("sign-in")} className={`flex-1 rounded-full px-2 py-1.5 text-xs font-semibold ${authMode === "sign-in" ? "bg-stone-950 text-white" : "text-stone-500"}`}>
               Sign in
             </button>
           </div>
-          <input
-            type="email"
-            value={email}
-            onChange={(event) => onEmailChange(event.target.value)}
-            placeholder="Email"
-            className="w-full rounded-2xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400"
-          />
-          <input
-            type="password"
-            value={password}
-            onChange={(event) => onPasswordChange(event.target.value)}
-            placeholder="Password"
-            className="w-full rounded-2xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400"
-          />
+          <input type="email" value={email} onChange={(event) => onEmailChange(event.target.value)} placeholder="Email" className="w-full rounded-2xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400" />
+          <input type="password" value={password} onChange={(event) => onPasswordChange(event.target.value)} placeholder="Password" className="w-full rounded-2xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400" />
           {authStatus ? <p className="text-xs leading-5 text-stone-500">{authStatus}</p> : null}
-          <button
-            type="submit"
-            disabled={authLoading}
-            className="w-full rounded-full bg-stone-950 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60"
-          >
+          <button type="submit" disabled={authLoading} className="w-full rounded-full bg-stone-950 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60">
             {authLoading ? "Working..." : authMode === "sign-in" ? "Sign in" : "Create free account"}
           </button>
         </form>
@@ -900,15 +1047,6 @@ function LogoBlock() {
   );
 }
 
-function FeatureTile({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="rounded-2xl border border-stone-200 bg-white/70 p-4 shadow-sm">
-      <p className="text-sm font-semibold text-stone-950">{title}</p>
-      <p className="mt-2 text-xs leading-5 text-stone-500">{body}</p>
-    </div>
-  );
-}
-
 function inputErrorForMode(mode: Mode): string {
   if (mode === "assignment") return "Paste the assignment brief or describe what you need to write.";
   if (mode === "humanizer") return "Paste text to humanize.";
@@ -927,28 +1065,10 @@ function loadingTextForMode(mode: Mode): string {
   return "Creating slides...";
 }
 
-function SidebarButton({
-  active,
-  icon,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  icon: string;
-  label: string;
-  onClick: () => void;
-}) {
+function SidebarButton({ active, icon, label, onClick }: { active: boolean; icon: string; label: string; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`flex min-w-max items-center gap-3 rounded-2xl border px-3 py-2.5 text-left text-sm transition lg:w-full ${
-        active
-          ? "border-stone-200 bg-white text-stone-950 shadow-sm"
-          : "border-transparent text-stone-600 hover:bg-white/75 hover:text-stone-950"
-      }`}
-    >
-      <span className="text-base">{icon}</span>
+    <button type="button" onClick={onClick} className={`flex min-w-max items-center gap-3 rounded-2xl border px-3 py-2.5 text-left text-sm transition lg:w-full ${active ? "border-stone-200 bg-white text-stone-950 shadow-sm" : "border-transparent text-stone-600 hover:bg-white/75 hover:text-stone-950"}`}>
+      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-stone-100 text-xs font-bold">{icon}</span>
       <span className="font-medium">{label}</span>
     </button>
   );
@@ -956,39 +1076,17 @@ function SidebarButton({
 
 function ModePill({ active, children, onClick }: { active: boolean; children: string; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-        active
-          ? "border-stone-900 bg-stone-950 text-white"
-          : "border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:text-stone-950"
-      }`}
-    >
+    <button type="button" onClick={onClick} className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${active ? "border-stone-900 bg-stone-950 text-white" : "border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:text-stone-950"}`}>
       {children}
     </button>
   );
 }
 
-function SelectField({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: string[];
-}) {
+function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) {
   return (
     <label className="block rounded-2xl border border-stone-200 bg-white px-3 py-2 shadow-sm">
       <span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-400">{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-1 w-full appearance-none bg-transparent text-sm font-medium text-stone-800 outline-none"
-      >
+      <select value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 w-full appearance-none bg-transparent text-sm font-medium text-stone-800 outline-none">
         {options.map((option) => (
           <option key={option} value={option} className="bg-white text-stone-900">
             {option}
@@ -999,38 +1097,18 @@ function SelectField({
   );
 }
 
-function TextAreaField({
-  label,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  placeholder: string;
-}) {
+function TextAreaField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder: string }) {
   return (
     <label className="block rounded-2xl border border-stone-200 bg-white px-3 py-2 shadow-sm lg:col-span-2">
       <span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-400">{label}</span>
-      <textarea
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        rows={4}
-        placeholder={placeholder}
-        className="mt-2 w-full resize-y border-0 bg-transparent text-sm leading-6 text-stone-800 outline-none placeholder:text-stone-400"
-      />
+      <textarea value={value} onChange={(event) => onChange(event.target.value)} rows={4} placeholder={placeholder} className="mt-2 w-full resize-y border-0 bg-transparent text-sm leading-6 text-stone-800 outline-none placeholder:text-stone-400" />
     </label>
   );
 }
 
 function HistoryButton({ entry, onClick }: { entry: HistoryEntry; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="w-full rounded-2xl border border-stone-200 bg-white/70 p-3 text-left transition hover:border-stone-300 hover:bg-white"
-    >
+    <button type="button" onClick={onClick} className="w-full rounded-2xl border border-stone-200 bg-white/70 p-3 text-left transition hover:border-stone-300 hover:bg-white">
       <span className="block truncate text-sm font-medium text-stone-700">{entry.title}</span>
       <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-400">{modeCopy[entry.mode].label}</span>
       <span className="mt-1 block text-xs leading-5 text-stone-500">{entry.preview}</span>
