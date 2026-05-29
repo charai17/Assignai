@@ -745,6 +745,7 @@ function extractSectionTargets(analysis: string, totalTarget: number): SectionTa
     if (!match) continue;
     const title = match[1].replace(/^#+\s*/, "").trim();
     const target = Number.parseInt(match[2], 10);
+    if (/selected|inferred|word count|citation style|academic level|marker|missing information/i.test(title)) continue;
     if (title && Number.isFinite(target) && target > 0) targets.push({ title, target });
   }
 
@@ -862,8 +863,32 @@ function getTotalTarget(targets: SectionTarget[]): number {
 }
 
 function extractSection(text: string, heading: string): string {
-  const pattern = new RegExp(`^#\\s+${escapeRegExp(heading)}\\s*$([\\s\\S]*?)(?=^#\\s+|$)`, "im");
-  return text.match(pattern)?.[1]?.trim() || "";
+  const lines = text.split(/\r?\n/);
+  const wanted = normalizeTitle(heading);
+  const captured: string[] = [];
+  let capturing = false;
+  let headingLevel = 0;
+
+  for (const line of lines) {
+    const headingMatch = line.match(/^(#{1,4})\s+(.+)$/);
+
+    if (headingMatch) {
+      const level = headingMatch[1].length;
+      const title = normalizeTitle(headingMatch[2]);
+
+      if (capturing && level <= headingLevel) break;
+
+      if (!capturing && title === wanted) {
+        capturing = true;
+        headingLevel = level;
+        continue;
+      }
+    }
+
+    if (capturing) captured.push(line);
+  }
+
+  return captured.join("\n").trim();
 }
 
 function stripReferenceBlocks(text: string): string {
