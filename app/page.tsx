@@ -159,6 +159,42 @@ export default function HomePage() {
     URL.revokeObjectURL(url);
   }
 
+  async function downloadDocument() {
+    if (!output) return;
+    setError("");
+    setDownloading(true);
+
+    try {
+      const response = await fetch("/api/document/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: documentTitle(), content: output }),
+      });
+
+      if (!response.ok) {
+        let data: ApiResponse = {};
+        try {
+          data = (await response.json()) as ApiResponse;
+        } catch {
+          // Fall through to the generic message below.
+        }
+        throw new Error(data.result || data.error || data.message || "Document download failed.");
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "assignai-document.docx";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Document download failed.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   async function downloadPowerPoint() {
     if (mode !== "powerpoint" || (!activeInput && !output)) return;
     setError("");
@@ -251,6 +287,12 @@ export default function HomePage() {
     }
 
     return { input: powerpointPrompt, topic: powerpointPrompt, audience, slideCount: Number(slideCount), style: deckStyle };
+  }
+
+  function documentTitle() {
+    if (mode === "assignment") return assignmentPrompt.replace(/\s+/g, " ").slice(0, 80) || "AssignAI Assignment";
+    if (mode === "humanizer") return "AssignAI Humanized Text";
+    return "AssignAI Output";
   }
 
   const copy = modeCopy[mode];
@@ -414,7 +456,7 @@ export default function HomePage() {
             <section className="rounded-[2rem] border border-stone-200 bg-[#fffdf8]/90 p-4 shadow-sm sm:p-5">
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Output</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Editor</p>
                   <h2 className="mt-1 text-2xl font-semibold tracking-tight text-stone-950">{copy.output}</h2>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -426,6 +468,16 @@ export default function HomePage() {
                       className="rounded-full border border-stone-900 bg-stone-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
                     >
                       {downloading ? "Building PPTX..." : "Download PPTX"}
+                    </button>
+                  ) : null}
+                  {mode !== "powerpoint" ? (
+                    <button
+                      type="button"
+                      onClick={downloadDocument}
+                      disabled={downloading || !output}
+                      className="rounded-full border border-stone-900 bg-stone-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {downloading ? "Building DOCX..." : "Download DOCX"}
                     </button>
                   ) : null}
                   <button
@@ -455,12 +507,18 @@ export default function HomePage() {
                     <p className="mt-1 text-sm">This usually only takes a moment.</p>
                   </div>
                 ) : output ? (
-                  <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-7 text-stone-800">{output}</pre>
+                  <textarea
+                    value={output}
+                    onChange={(event) => setOutput(event.target.value)}
+                    rows={24}
+                    spellCheck="true"
+                    className="min-h-[30rem] w-full resize-y border-0 bg-transparent font-sans text-sm leading-7 text-stone-800 outline-none"
+                  />
                 ) : (
                   <div className="flex h-full min-h-[18rem] flex-col items-center justify-center text-center text-stone-500">
                     <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-stone-200 bg-[#fbf7ef] text-xl">✦</div>
                     <p className="font-medium text-stone-800">Your output will appear below the composer.</p>
-                    <p className="mt-2 max-w-sm text-sm">Choose a tool, add your prompt, and review the generated result here.</p>
+                    <p className="mt-2 max-w-sm text-sm">Choose a tool, add your prompt, and review or edit the generated result here.</p>
                   </div>
                 )}
               </div>
