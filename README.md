@@ -6,17 +6,18 @@ AssignAI is a focused writing and presentation studio with three tools:
 - Humanizer: takes pasted text and returns a cleaner, more natural version while preserving meaning.
 - PowerPoint Creator: turns a topic into a slide-by-slide outline and exports a `.pptx` deck.
 
-The app now has a simple pre-sign-up landing page, Supabase auth, cloud saved history, local fallback history, OpenRouter generation routes, DOCX export, and PPTX export.
+The app now starts with an Assignment Writer pre-sign-up screen. Visitors can fill in the brief, rubric, word count, citation style, and extra notes first. When they click Generate, AssignAI sends them to sign up so the generated work can be saved to their workspace.
 
 ## Product Flow
 
-1. Visitors land on a simple marketing/sign-up page.
-2. They can create a free account, sign in, or try the studio without an account.
-3. Signed-in users get Supabase cloud history.
-4. Signed-out users can still generate work with browser-only history.
-5. Every signed-in generation creates a project, generation record, and usage event.
-6. Users can reopen saved outputs from the sidebar.
-7. Outputs can be edited, copied, downloaded as text, exported as DOCX, or exported as PPTX for presentations.
+1. Visitors land directly on the Assignment Writer form.
+2. They paste the assignment brief and optionally add rubric, citation style, word count, subject, tone, and extra notes.
+3. Clicking Generate before sign-up scrolls the visitor to the account creation section.
+4. After sign-up or sign-in, the user enters the full studio.
+5. Signed-in users get Supabase cloud history.
+6. Every signed-in generation creates a project, generation record, and usage event.
+7. Users can reopen saved outputs from the sidebar.
+8. Outputs can be edited, copied, downloaded as text, exported as DOCX, or exported as PPTX for presentations.
 
 ## Assignment Writer Flow
 
@@ -63,8 +64,6 @@ Tables:
 - `generations`: saved input/output records.
 - `usage_events`: usage tracking for future credits and billing.
 
-When Supabase is configured, users can sign up, sign in, and save generations to cloud history. When it is not configured, AssignAI still works with local browser history.
-
 ## Humanizer Policy
 
 The backend includes a natural writing policy adapted from [`blader/humanizer`](https://github.com/blader/humanizer), which is MIT licensed. It is used as prompt guidance for Assignment Writer, Humanizer, and PowerPoint outputs.
@@ -80,8 +79,6 @@ The policy focuses on:
 AssignAI uses this as an editing quality layer, not as a guarantee against AI detection. Users still need to verify sources, citations, facts, and whether the work follows their institution's rules.
 
 ## Backend Routes
-
-The app exposes these routes:
 
 ```text
 POST /api/assignment
