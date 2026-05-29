@@ -1,9 +1,11 @@
-export type AiProvider = "mock" | "openrouter";
+export type AiProvider = "mock" | "openai" | "openrouter";
 
 export type AppConfig = {
   serviceName: string;
   ai: {
     provider: AiProvider;
+    openAiApiKey?: string;
+    openAiModel: string;
     openRouterApiKey?: string;
     openRouterModel: string;
     appUrl?: string;
@@ -21,15 +23,21 @@ const DEFAULT_TIMEOUT_MS = 45_000;
 const DEFAULT_MAX_INPUT_CHARS = 20_000;
 const DEFAULT_RATE_LIMIT_WINDOW_MS = 60_000;
 const DEFAULT_RATE_LIMIT_MAX_REQUESTS = 20;
+const DEFAULT_OPENAI_MODEL = "gpt-4.1";
 const DEFAULT_OPENROUTER_MODEL = "openai/gpt-4.1-mini";
 
 export function getConfig(): AppConfig {
+  const requestedProvider = optionalEnv("AI_PROVIDER") as AiProvider | undefined;
+  const openAiApiKey = optionalEnv("OPENAI_API_KEY");
   const openRouterApiKey = optionalEnv("OPENROUTER_API_KEY");
+  const provider = chooseProvider(requestedProvider, openAiApiKey, openRouterApiKey);
 
   return {
     serviceName: process.env.SERVICE_NAME || "assignai",
     ai: {
-      provider: openRouterApiKey ? "openrouter" : "mock",
+      provider,
+      openAiApiKey,
+      openAiModel: optionalEnv("OPENAI_MODEL") || DEFAULT_OPENAI_MODEL,
       openRouterApiKey,
       openRouterModel: optionalEnv("OPENROUTER_MODEL") || DEFAULT_OPENROUTER_MODEL,
       appUrl: optionalEnv("OPENROUTER_APP_URL"),
@@ -42,6 +50,15 @@ export function getConfig(): AppConfig {
       rateLimitMaxRequests: readPositiveInteger("RATE_LIMIT_MAX_REQUESTS", DEFAULT_RATE_LIMIT_MAX_REQUESTS),
     },
   };
+}
+
+function chooseProvider(requested: AiProvider | undefined, openAiApiKey: string | undefined, openRouterApiKey: string | undefined): AiProvider {
+  if (requested === "mock") return "mock";
+  if (requested === "openai" && openAiApiKey) return "openai";
+  if (requested === "openrouter" && openRouterApiKey) return "openrouter";
+  if (openAiApiKey) return "openai";
+  if (openRouterApiKey) return "openrouter";
+  return "mock";
 }
 
 function optionalEnv(name: string): string | undefined {
