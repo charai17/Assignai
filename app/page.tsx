@@ -147,6 +147,7 @@ export default function HomePage() {
     authLoading,
     onAuthModeChange: setAuthMode,
     onEmailChange: setEmail,
+    onGoogleSignIn: handleGoogleSignIn,
     onPasswordChange: setPassword,
     onSignOut: signOut,
     onSubmit: handleAuth,
@@ -178,6 +179,30 @@ export default function HomePage() {
         onWordCountChange={setWordCount}
       />
     );
+  }
+
+  async function handleGoogleSignIn() {
+    setAuthStatus("");
+
+    if (!supabase) {
+      setAuthStatus("Supabase is not configured yet.");
+      return;
+    }
+
+    setAuthLoading(true);
+    const { error: googleError } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+        queryParams: {
+          access_type: "offline",
+          prompt: "select_account",
+        },
+      },
+    });
+    setAuthLoading(false);
+
+    if (googleError) setAuthStatus(googleError.message);
   }
 
   async function handlePreSignupGenerate() {
@@ -510,13 +535,7 @@ export default function HomePage() {
 
           <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:mt-8 lg:flex-col lg:overflow-visible lg:pb-0" aria-label="AssignAI tools">
             {(["assignment", "humanizer", "powerpoint"] as Mode[]).map((item) => (
-              <SidebarButton
-                key={item}
-                active={mode === item}
-                icon={modeCopy[item].icon}
-                label={modeCopy[item].label}
-                onClick={() => switchMode(item)}
-              />
+              <SidebarButton key={item} active={mode === item} icon={modeCopy[item].icon} label={modeCopy[item].label} onClick={() => switchMode(item)} />
             ))}
           </nav>
 
@@ -557,7 +576,6 @@ export default function HomePage() {
             </header>
 
             <ToolComposer
-              activeInput={activeInput}
               assignmentPrompt={assignmentPrompt}
               assignmentTone={assignmentTone}
               audience={audience}
@@ -623,29 +641,7 @@ export default function HomePage() {
   );
 }
 
-function PreSignupAssignmentPage({
-  assignmentPrompt,
-  authProps,
-  citationStyle,
-  draftType,
-  landingError,
-  level,
-  rubric,
-  sources,
-  subject,
-  tone,
-  wordCount,
-  onCitationStyleChange,
-  onDraftTypeChange,
-  onGenerate,
-  onLevelChange,
-  onPromptChange,
-  onRubricChange,
-  onSourcesChange,
-  onSubjectChange,
-  onToneChange,
-  onWordCountChange,
-}: {
+function PreSignupAssignmentPage(props: {
   assignmentPrompt: string;
   authProps: AccountPanelProps;
   citationStyle: string;
@@ -693,51 +689,27 @@ function PreSignupAssignmentPage({
             <section className="mt-8 rounded-[2rem] border border-stone-200 bg-[#fffdf8] p-3 shadow-[0_24px_80px_rgba(68,53,35,0.10)]">
               <label className="block px-1 pt-2">
                 <span className="sr-only">Assignment brief</span>
-                <textarea
-                  value={assignmentPrompt}
-                  onChange={(event) => onPromptChange(event.target.value)}
-                  rows={8}
-                  placeholder={modeCopy.assignment.placeholder}
-                  className="min-h-[14rem] w-full resize-y rounded-[1.5rem] border-0 bg-transparent px-4 py-4 text-base leading-7 text-stone-900 outline-none placeholder:text-stone-400"
-                />
+                <textarea value={props.assignmentPrompt} onChange={(event) => props.onPromptChange(event.target.value)} rows={8} placeholder={modeCopy.assignment.placeholder} className="min-h-[14rem] w-full resize-y rounded-[1.5rem] border-0 bg-transparent px-4 py-4 text-base leading-7 text-stone-900 outline-none placeholder:text-stone-400" />
               </label>
 
               <div className="grid gap-2 px-2 pb-2 sm:grid-cols-2 lg:grid-cols-4">
-                <SelectField label="Draft type" value={draftType} onChange={onDraftTypeChange} options={draftTypes} />
-                <SelectField label="Citation" value={citationStyle} onChange={onCitationStyleChange} options={citationStyles} />
-                <SelectField label="Level" value={level} onChange={onLevelChange} options={levels} />
-                <SelectField label="Words" value={wordCount} onChange={onWordCountChange} options={wordCounts} />
-                <SelectField label="Tone" value={tone} onChange={onToneChange} options={assignmentTones} />
-                <SelectField label="Subject" value={subject} onChange={onSubjectChange} options={subjects} />
-                <TextAreaField
-                  label="Rubric / marking criteria"
-                  value={rubric}
-                  onChange={onRubricChange}
-                  placeholder="Optional: paste marking criteria, learning outcomes, grade descriptors, or tutor notes."
-                />
-                <TextAreaField
-                  label="Extra information"
-                  value={sources}
-                  onChange={onSourcesChange}
-                  placeholder="Optional: paste source notes, required readings, your draft, tutor instructions, preferred argument, or evidence."
-                />
+                <SelectField label="Draft type" value={props.draftType} onChange={props.onDraftTypeChange} options={draftTypes} />
+                <SelectField label="Citation" value={props.citationStyle} onChange={props.onCitationStyleChange} options={citationStyles} />
+                <SelectField label="Level" value={props.level} onChange={props.onLevelChange} options={levels} />
+                <SelectField label="Words" value={props.wordCount} onChange={props.onWordCountChange} options={wordCounts} />
+                <SelectField label="Tone" value={props.tone} onChange={props.onToneChange} options={assignmentTones} />
+                <SelectField label="Subject" value={props.subject} onChange={props.onSubjectChange} options={subjects} />
+                <TextAreaField label="Rubric / marking criteria" value={props.rubric} onChange={props.onRubricChange} placeholder="Optional: paste marking criteria, learning outcomes, grade descriptors, or tutor notes." />
+                <TextAreaField label="Extra information" value={props.sources} onChange={props.onSourcesChange} placeholder="Optional: paste source notes, required readings, your draft, tutor instructions, preferred argument, or evidence." />
               </div>
 
-              {landingError ? (
-                <div className="mx-2 mb-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  {landingError}
-                </div>
-              ) : null}
+              {props.landingError ? <div className="mx-2 mb-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{props.landingError}</div> : null}
 
               <div className="flex flex-col gap-3 border-t border-stone-100 px-2 pb-1 pt-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs text-stone-500">Generate is unlocked after sign up so your work can be saved.</p>
-                <button
-                  type="button"
-                  onClick={onGenerate}
-                  className="inline-flex items-center justify-center rounded-full bg-stone-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800"
-                >
+                <button type="button" onClick={props.onGenerate} className="inline-flex items-center justify-center rounded-full bg-stone-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800">
                   Generate assignment
-                  <span className="ml-2">→</span>
+                  <span className="ml-2">-&gt;</span>
                 </button>
               </div>
             </section>
@@ -748,10 +720,10 @@ function PreSignupAssignmentPage({
               <p className="text-sm font-semibold text-stone-200">Create workspace</p>
               <h2 className="mt-2 text-3xl font-semibold tracking-tight">Save your generated work</h2>
               <p className="mt-3 text-sm leading-6 text-stone-300">
-                Sign up to generate the assignment and keep drafts, humanized text, and presentations in cloud history.
+                Sign up with Google or email to generate the assignment and keep drafts, humanized text, and presentations in cloud history.
               </p>
             </div>
-            <AccountPanel {...authProps} compact />
+            <AccountPanel {...props.authProps} compact />
           </aside>
         </section>
       </div>
@@ -760,7 +732,6 @@ function PreSignupAssignmentPage({
 }
 
 function ToolComposer(props: {
-  activeInput: string;
   assignmentPrompt: string;
   assignmentTone: string;
   audience: string;
@@ -803,9 +774,7 @@ function ToolComposer(props: {
     <form onSubmit={props.onSubmit} className="rounded-[2rem] border border-stone-200 bg-[#fffdf8] p-3 shadow-[0_24px_80px_rgba(68,53,35,0.10)]">
       <div className="flex flex-wrap gap-2 border-b border-stone-100 px-2 pb-3 pt-1">
         {(["assignment", "humanizer", "powerpoint"] as Mode[]).map((item) => (
-          <ModePill key={item} active={props.mode === item} onClick={() => props.onModeChange(item)}>
-            {modeCopy[item].label}
-          </ModePill>
+          <ModePill key={item} active={props.mode === item} onClick={() => props.onModeChange(item)}>{modeCopy[item].label}</ModePill>
         ))}
       </div>
 
@@ -841,9 +810,7 @@ function ToolComposer(props: {
         {props.mode === "humanizer" ? (
           <>
             <SelectField label="Tone" value={props.humanizerTone} onChange={props.onHumanizerToneChange} options={humanizerTones} />
-            <div className="hidden rounded-2xl border border-dashed border-stone-200 bg-stone-50/60 px-3 py-2 text-xs text-stone-500 sm:block lg:col-span-3">
-              Paste the original text. The output will only contain the rewritten version.
-            </div>
+            <div className="hidden rounded-2xl border border-dashed border-stone-200 bg-stone-50/60 px-3 py-2 text-xs text-stone-500 sm:block lg:col-span-3">Paste the original text. The output will only contain the rewritten version.</div>
           </>
         ) : null}
 
@@ -852,48 +819,24 @@ function ToolComposer(props: {
             <SelectField label="Audience" value={props.audience} onChange={props.onAudienceChange} options={audiences} />
             <SelectField label="Slides" value={props.slideCount} onChange={props.onSlideCountChange} options={slideCounts} />
             <SelectField label="Style" value={props.deckStyle} onChange={props.onDeckStyleChange} options={deckStyles} />
-            <div className="hidden rounded-2xl border border-dashed border-stone-200 bg-stone-50/60 px-3 py-2 text-xs text-stone-500 lg:block">
-              Generates an outline first, then exports a `.pptx` deck.
-            </div>
+            <div className="hidden rounded-2xl border border-dashed border-stone-200 bg-stone-50/60 px-3 py-2 text-xs text-stone-500 lg:block">Generates an outline first, then exports a `.pptx` deck.</div>
           </>
         ) : null}
       </div>
 
-      {props.error ? (
-        <div className="mx-2 mb-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {props.error}
-        </div>
-      ) : null}
+      {props.error ? <div className="mx-2 mb-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{props.error}</div> : null}
 
       <div className="flex flex-col gap-3 border-t border-stone-100 px-2 pb-1 pt-3 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-xs text-stone-500">{footerForMode(props.mode)}</p>
-        <button
-          type="submit"
-          disabled={props.loading}
-          className="inline-flex items-center justify-center rounded-full bg-stone-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {props.loading ? loadingTextForMode(props.mode) : copy.cta}
-          <span className="ml-2">→</span>
+        <button type="submit" disabled={props.loading} className="inline-flex items-center justify-center rounded-full bg-stone-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60">
+          {props.loading ? loadingTextForMode(props.mode) : copy.cta}<span className="ml-2">-&gt;</span>
         </button>
       </div>
     </form>
   );
 }
 
-function OutputEditor({
-  activeInput,
-  copied,
-  downloading,
-  loading,
-  mode,
-  output,
-  outputTitle,
-  onCopy,
-  onDownloadDocument,
-  onDownloadOutput,
-  onDownloadPowerPoint,
-  onOutputChange,
-}: {
+function OutputEditor(props: {
   activeInput: string;
   copied: boolean;
   downloading: boolean;
@@ -910,45 +853,22 @@ function OutputEditor({
   return (
     <section className="rounded-[2rem] border border-stone-200 bg-[#fffdf8]/90 p-4 shadow-sm sm:p-5">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Editor</p>
-          <h2 className="mt-1 text-2xl font-semibold tracking-tight text-stone-950">{outputTitle}</h2>
-        </div>
+        <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Editor</p><h2 className="mt-1 text-2xl font-semibold tracking-tight text-stone-950">{props.outputTitle}</h2></div>
         <div className="flex flex-wrap gap-2">
-          {mode === "powerpoint" ? (
-            <button type="button" onClick={onDownloadPowerPoint} disabled={downloading || (!output && !activeInput)} className="rounded-full border border-stone-900 bg-stone-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40">
-              {downloading ? "Building PPTX..." : "Download PPTX"}
-            </button>
-          ) : null}
-          {mode !== "powerpoint" ? (
-            <button type="button" onClick={onDownloadDocument} disabled={downloading || !output} className="rounded-full border border-stone-900 bg-stone-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40">
-              {downloading ? "Building DOCX..." : "Download DOCX"}
-            </button>
-          ) : null}
-          <button type="button" onClick={onDownloadOutput} disabled={!output} className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40">
-            Download text
-          </button>
-          <button type="button" onClick={onCopy} disabled={!output} className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40">
-            {copied ? "Copied" : "Copy"}
-          </button>
+          {props.mode === "powerpoint" ? <button type="button" onClick={props.onDownloadPowerPoint} disabled={props.downloading || (!props.output && !props.activeInput)} className="rounded-full border border-stone-900 bg-stone-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40">{props.downloading ? "Building PPTX..." : "Download PPTX"}</button> : null}
+          {props.mode !== "powerpoint" ? <button type="button" onClick={props.onDownloadDocument} disabled={props.downloading || !props.output} className="rounded-full border border-stone-900 bg-stone-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40">{props.downloading ? "Building DOCX..." : "Download DOCX"}</button> : null}
+          <button type="button" onClick={props.onDownloadOutput} disabled={!props.output} className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40">Download text</button>
+          <button type="button" onClick={props.onCopy} disabled={!props.output} className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40">{props.copied ? "Copied" : "Copy"}</button>
         </div>
       </div>
 
       <div className="min-h-[20rem] rounded-[1.5rem] border border-stone-200 bg-white p-5">
-        {loading ? (
-          <div className="flex h-full min-h-[18rem] flex-col items-center justify-center text-center text-stone-500">
-            <div className="mb-4 h-9 w-9 animate-spin rounded-full border-2 border-stone-200 border-t-stone-900" />
-            <p className="font-medium text-stone-800">Creating your result</p>
-            <p className="mt-1 text-sm">This usually only takes a moment.</p>
-          </div>
-        ) : output ? (
-          <textarea value={output} onChange={(event) => onOutputChange(event.target.value)} rows={24} spellCheck="true" className="min-h-[30rem] w-full resize-y border-0 bg-transparent font-sans text-sm leading-7 text-stone-800 outline-none" />
+        {props.loading ? (
+          <div className="flex h-full min-h-[18rem] flex-col items-center justify-center text-center text-stone-500"><div className="mb-4 h-9 w-9 animate-spin rounded-full border-2 border-stone-200 border-t-stone-900" /><p className="font-medium text-stone-800">Creating your result</p><p className="mt-1 text-sm">This usually only takes a moment.</p></div>
+        ) : props.output ? (
+          <textarea value={props.output} onChange={(event) => props.onOutputChange(event.target.value)} rows={24} spellCheck="true" className="min-h-[30rem] w-full resize-y border-0 bg-transparent font-sans text-sm leading-7 text-stone-800 outline-none" />
         ) : (
-          <div className="flex h-full min-h-[18rem] flex-col items-center justify-center text-center text-stone-500">
-            <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-stone-200 bg-[#fbf7ef] text-xl">AI</div>
-            <p className="font-medium text-stone-800">Your output will appear here.</p>
-            <p className="mt-2 max-w-sm text-sm">Choose a tool, add your prompt, and review or edit the generated result.</p>
-          </div>
+          <div className="flex h-full min-h-[18rem] flex-col items-center justify-center text-center text-stone-500"><div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-stone-200 bg-[#fbf7ef] text-xl">AI</div><p className="font-medium text-stone-800">Your output will appear here.</p><p className="mt-2 max-w-sm text-sm">Choose a tool, add your prompt, and review or edit the generated result.</p></div>
         )}
       </div>
     </section>
@@ -967,84 +887,53 @@ type AccountPanelProps = {
   compact?: boolean;
   onAuthModeChange: (mode: AuthMode) => void;
   onEmailChange: (value: string) => void;
+  onGoogleSignIn: () => void;
   onPasswordChange: (value: string) => void;
   onSignOut: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 };
 
-function AccountPanel({
-  authMode,
-  authStatus,
-  email,
-  password,
-  supabaseReady,
-  syncStatus,
-  user,
-  authLoading,
-  compact = false,
-  onAuthModeChange,
-  onEmailChange,
-  onPasswordChange,
-  onSignOut,
-  onSubmit,
-}: AccountPanelProps) {
+function AccountPanel(props: AccountPanelProps) {
   return (
-    <section className={compact ? "" : "mt-4 rounded-3xl border border-stone-200 bg-white/55 p-4 shadow-sm"}>
-      {!compact ? (
+    <section className={props.compact ? "" : "mt-4 rounded-3xl border border-stone-200 bg-white/55 p-4 shadow-sm"}>
+      {!props.compact ? (
         <div className="mb-3 flex items-center justify-between gap-3">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Account</p>
-          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${user ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-stone-500"}`}>
-            {user ? "Synced" : "Locked"}
-          </span>
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${props.user ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-stone-500"}`}>{props.user ? "Synced" : "Locked"}</span>
         </div>
       ) : null}
 
-      {!supabaseReady ? (
+      {!props.supabaseReady ? (
         <p className="text-xs leading-5 text-stone-500">Add Supabase env vars to enable login and cloud history.</p>
-      ) : user ? (
-        <div className="space-y-3">
-          <div>
-            <p className="truncate text-sm font-medium text-stone-800">{user.email}</p>
-            <p className="mt-1 text-xs leading-5 text-stone-500">{syncStatus || "Cloud history is active."}</p>
-          </div>
-          <button type="button" onClick={onSignOut} className="w-full rounded-full border border-stone-200 bg-white px-3 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50">
-            Sign out
-          </button>
-        </div>
+      ) : props.user ? (
+        <div className="space-y-3"><div><p className="truncate text-sm font-medium text-stone-800">{props.user.email}</p><p className="mt-1 text-xs leading-5 text-stone-500">{props.syncStatus || "Cloud history is active."}</p></div><button type="button" onClick={props.onSignOut} className="w-full rounded-full border border-stone-200 bg-white px-3 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50">Sign out</button></div>
       ) : (
-        <form onSubmit={onSubmit} className="space-y-2">
-          <div className="flex gap-1 rounded-full border border-stone-200 bg-white p-1">
-            <button type="button" onClick={() => onAuthModeChange("sign-up")} className={`flex-1 rounded-full px-2 py-1.5 text-xs font-semibold ${authMode === "sign-up" ? "bg-stone-950 text-white" : "text-stone-500"}`}>
-              Sign up
-            </button>
-            <button type="button" onClick={() => onAuthModeChange("sign-in")} className={`flex-1 rounded-full px-2 py-1.5 text-xs font-semibold ${authMode === "sign-in" ? "bg-stone-950 text-white" : "text-stone-500"}`}>
-              Sign in
-            </button>
-          </div>
-          <input type="email" value={email} onChange={(event) => onEmailChange(event.target.value)} placeholder="Email" className="w-full rounded-2xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400" />
-          <input type="password" value={password} onChange={(event) => onPasswordChange(event.target.value)} placeholder="Password" className="w-full rounded-2xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400" />
-          {authStatus ? <p className="text-xs leading-5 text-stone-500">{authStatus}</p> : null}
-          <button type="submit" disabled={authLoading} className="w-full rounded-full bg-stone-950 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60">
-            {authLoading ? "Working..." : authMode === "sign-in" ? "Sign in" : "Create free account"}
+        <div className="space-y-3">
+          <button type="button" onClick={props.onGoogleSignIn} disabled={props.authLoading} className="flex w-full items-center justify-center gap-2 rounded-full border border-stone-200 bg-white px-3 py-2.5 text-sm font-semibold text-stone-800 transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-60">
+            <span className="flex h-5 w-5 items-center justify-center rounded-full border border-stone-200 text-xs font-bold">G</span>
+            Continue with Google
           </button>
-        </form>
+
+          <div className="flex items-center gap-3 text-xs text-stone-400"><span className="h-px flex-1 bg-stone-200" />or use email<span className="h-px flex-1 bg-stone-200" /></div>
+
+          <form onSubmit={props.onSubmit} className="space-y-2">
+            <div className="flex gap-1 rounded-full border border-stone-200 bg-white p-1">
+              <button type="button" onClick={() => props.onAuthModeChange("sign-up")} className={`flex-1 rounded-full px-2 py-1.5 text-xs font-semibold ${props.authMode === "sign-up" ? "bg-stone-950 text-white" : "text-stone-500"}`}>Sign up</button>
+              <button type="button" onClick={() => props.onAuthModeChange("sign-in")} className={`flex-1 rounded-full px-2 py-1.5 text-xs font-semibold ${props.authMode === "sign-in" ? "bg-stone-950 text-white" : "text-stone-500"}`}>Sign in</button>
+            </div>
+            <input type="email" value={props.email} onChange={(event) => props.onEmailChange(event.target.value)} placeholder="Email" className="w-full rounded-2xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400" />
+            <input type="password" value={props.password} onChange={(event) => props.onPasswordChange(event.target.value)} placeholder="Password" className="w-full rounded-2xl border border-stone-200 bg-white px-3 py-2 text-sm outline-none placeholder:text-stone-400" />
+            {props.authStatus ? <p className="text-xs leading-5 text-stone-500">{props.authStatus}</p> : null}
+            <button type="submit" disabled={props.authLoading} className="w-full rounded-full bg-stone-950 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60">{props.authLoading ? "Working..." : props.authMode === "sign-in" ? "Sign in" : "Create free account"}</button>
+          </form>
+        </div>
       )}
     </section>
   );
 }
 
 function LogoBlock() {
-  return (
-    <div className="flex items-center gap-2">
-      <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-stone-300 bg-stone-950 text-sm font-semibold text-white shadow-sm">
-        AI
-      </div>
-      <div>
-        <p className="text-sm font-semibold tracking-tight text-stone-950">AssignAI</p>
-        <p className="hidden text-xs text-stone-500 sm:block">Writing and presentation studio</p>
-      </div>
-    </div>
-  );
+  return <div className="flex items-center gap-2"><div className="flex h-8 w-8 items-center justify-center rounded-xl border border-stone-300 bg-stone-950 text-sm font-semibold text-white shadow-sm">AI</div><div><p className="text-sm font-semibold tracking-tight text-stone-950">AssignAI</p><p className="hidden text-xs text-stone-500 sm:block">Writing and presentation studio</p></div></div>;
 }
 
 function inputErrorForMode(mode: Mode): string {
@@ -1066,61 +955,25 @@ function loadingTextForMode(mode: Mode): string {
 }
 
 function SidebarButton({ active, icon, label, onClick }: { active: boolean; icon: string; label: string; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} className={`flex min-w-max items-center gap-3 rounded-2xl border px-3 py-2.5 text-left text-sm transition lg:w-full ${active ? "border-stone-200 bg-white text-stone-950 shadow-sm" : "border-transparent text-stone-600 hover:bg-white/75 hover:text-stone-950"}`}>
-      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-stone-100 text-xs font-bold">{icon}</span>
-      <span className="font-medium">{label}</span>
-    </button>
-  );
+  return <button type="button" onClick={onClick} className={`flex min-w-max items-center gap-3 rounded-2xl border px-3 py-2.5 text-left text-sm transition lg:w-full ${active ? "border-stone-200 bg-white text-stone-950 shadow-sm" : "border-transparent text-stone-600 hover:bg-white/75 hover:text-stone-950"}`}><span className="flex h-6 w-6 items-center justify-center rounded-full bg-stone-100 text-xs font-bold">{icon}</span><span className="font-medium">{label}</span></button>;
 }
 
 function ModePill({ active, children, onClick }: { active: boolean; children: string; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${active ? "border-stone-900 bg-stone-950 text-white" : "border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:text-stone-950"}`}>
-      {children}
-    </button>
-  );
+  return <button type="button" onClick={onClick} className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${active ? "border-stone-900 bg-stone-950 text-white" : "border-stone-200 bg-white text-stone-600 hover:border-stone-300 hover:text-stone-950"}`}>{children}</button>;
 }
 
 function SelectField({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: string[] }) {
-  return (
-    <label className="block rounded-2xl border border-stone-200 bg-white px-3 py-2 shadow-sm">
-      <span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-400">{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 w-full appearance-none bg-transparent text-sm font-medium text-stone-800 outline-none">
-        {options.map((option) => (
-          <option key={option} value={option} className="bg-white text-stone-900">
-            {option}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
+  return <label className="block rounded-2xl border border-stone-200 bg-white px-3 py-2 shadow-sm"><span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-400">{label}</span><select value={value} onChange={(event) => onChange(event.target.value)} className="mt-1 w-full appearance-none bg-transparent text-sm font-medium text-stone-800 outline-none">{options.map((option) => <option key={option} value={option} className="bg-white text-stone-900">{option}</option>)}</select></label>;
 }
 
 function TextAreaField({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (value: string) => void; placeholder: string }) {
-  return (
-    <label className="block rounded-2xl border border-stone-200 bg-white px-3 py-2 shadow-sm lg:col-span-2">
-      <span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-400">{label}</span>
-      <textarea value={value} onChange={(event) => onChange(event.target.value)} rows={4} placeholder={placeholder} className="mt-2 w-full resize-y border-0 bg-transparent text-sm leading-6 text-stone-800 outline-none placeholder:text-stone-400" />
-    </label>
-  );
+  return <label className="block rounded-2xl border border-stone-200 bg-white px-3 py-2 shadow-sm lg:col-span-2"><span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-stone-400">{label}</span><textarea value={value} onChange={(event) => onChange(event.target.value)} rows={4} placeholder={placeholder} className="mt-2 w-full resize-y border-0 bg-transparent text-sm leading-6 text-stone-800 outline-none placeholder:text-stone-400" /></label>;
 }
 
 function HistoryButton({ entry, onClick }: { entry: HistoryEntry; onClick: () => void }) {
-  return (
-    <button type="button" onClick={onClick} className="w-full rounded-2xl border border-stone-200 bg-white/70 p-3 text-left transition hover:border-stone-300 hover:bg-white">
-      <span className="block truncate text-sm font-medium text-stone-700">{entry.title}</span>
-      <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-400">{modeCopy[entry.mode].label}</span>
-      <span className="mt-1 block text-xs leading-5 text-stone-500">{entry.preview}</span>
-    </button>
-  );
+  return <button type="button" onClick={onClick} className="w-full rounded-2xl border border-stone-200 bg-white/70 p-3 text-left transition hover:border-stone-300 hover:bg-white"><span className="block truncate text-sm font-medium text-stone-700">{entry.title}</span><span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-400">{modeCopy[entry.mode].label}</span><span className="mt-1 block text-xs leading-5 text-stone-500">{entry.preview}</span></button>;
 }
 
 function HistoryItem({ title, meta }: { title: string; meta: string }) {
-  return (
-    <div className="rounded-2xl border border-stone-200 bg-white/70 p-3">
-      <p className="truncate text-sm font-medium text-stone-700">{title}</p>
-      <p className="mt-1 text-xs leading-5 text-stone-500">{meta}</p>
-    </div>
-  );
+  return <div className="rounded-2xl border border-stone-200 bg-white/70 p-3"><p className="truncate text-sm font-medium text-stone-700">{title}</p><p className="mt-1 text-xs leading-5 text-stone-500">{meta}</p></div>;
 }
