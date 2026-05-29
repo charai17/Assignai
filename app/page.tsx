@@ -75,6 +75,7 @@ const modeCopy: Record<Mode, { label: string; icon: string; eyebrow: string; out
 export default function HomePage() {
   const supabase = useMemo(() => getSupabaseBrowserClient(), []);
   const [mode, setMode] = useState<Mode>("assignment");
+  const [studioOpen, setStudioOpen] = useState(false);
   const [assignmentPrompt, setAssignmentPrompt] = useState("");
   const [rubric, setRubric] = useState("");
   const [sources, setSources] = useState("");
@@ -92,7 +93,7 @@ export default function HomePage() {
   const [audience, setAudience] = useState(audiences[0]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [user, setUser] = useState<User | null>(null);
-  const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
+  const [authMode, setAuthMode] = useState<AuthMode>("sign-up");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [authStatus, setAuthStatus] = useState("");
@@ -100,6 +101,7 @@ export default function HomePage() {
   const [output, setOutput] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -117,12 +119,18 @@ export default function HomePage() {
 
     supabase.auth.getUser().then(({ data }) => {
       setUser(data.user);
-      if (data.user) void loadCloudHistory(data.user.id, supabase);
+      if (data.user) {
+        setStudioOpen(true);
+        void loadCloudHistory(data.user.id, supabase);
+      }
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
-      if (session?.user) void loadCloudHistory(session.user.id, supabase);
+      if (session?.user) {
+        setStudioOpen(true);
+        void loadCloudHistory(session.user.id, supabase);
+      }
     });
 
     return () => listener.subscription.unsubscribe();
@@ -133,6 +141,26 @@ export default function HomePage() {
     if (mode === "humanizer") return humanizerText.trim();
     return powerpointPrompt.trim();
   }, [assignmentPrompt, humanizerText, mode, powerpointPrompt]);
+
+  const authProps = {
+    authMode,
+    authStatus,
+    email,
+    password,
+    supabaseReady: hasSupabaseConfig(),
+    syncStatus,
+    user,
+    authLoading,
+    onAuthModeChange: setAuthMode,
+    onEmailChange: setEmail,
+    onPasswordChange: setPassword,
+    onSignOut: signOut,
+    onSubmit: handleAuth,
+  };
+
+  if (!studioOpen && !user) {
+    return <LandingPage authProps={authProps} onTry={() => setStudioOpen(true)} />;
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -189,11 +217,13 @@ export default function HomePage() {
       return;
     }
 
+    setAuthLoading(true);
     const authRequest = authMode === "sign-in"
       ? supabase.auth.signInWithPassword({ email: email.trim(), password })
       : supabase.auth.signUp({ email: email.trim(), password });
 
     const { data, error: authError } = await authRequest;
+    setAuthLoading(false);
 
     if (authError) {
       setAuthStatus(authError.message);
@@ -206,6 +236,7 @@ export default function HomePage() {
     }
 
     setUser(data.user ?? null);
+    setStudioOpen(true);
     setAuthStatus(authMode === "sign-in" ? "Signed in." : "Account created.");
   }
 
@@ -213,6 +244,7 @@ export default function HomePage() {
     if (!supabase) return;
     await supabase.auth.signOut();
     setUser(null);
+    setStudioOpen(false);
     setSyncStatus("Signed out. Showing this device's history.");
     try {
       const saved = window.localStorage.getItem(HISTORY_KEY);
@@ -229,7 +261,7 @@ export default function HomePage() {
       .select("id, mode, title, output, created_at")
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
-      .limit(8);
+      .limit(12);
 
     if (historyError) {
       setSyncStatus("Local history is active. Run the Supabase schema if cloud history is not ready yet.");
@@ -350,13 +382,13 @@ export default function HomePage() {
     const entry: HistoryEntry = {
       id: crypto.randomUUID(),
       mode,
-      title: activeInput.replace(/\s+/g, " ").slice(0, 48) || modeCopy[mode].label,
+      title: activeInput.replace(/\s+/g, " ").slice(0, 56) || modeCopy[mode].label,
       preview: generated.replace(/\s+/g, " ").slice(0, 90),
       output: generated,
       createdAt: new Date().toISOString(),
     };
 
-    const nextHistory = [entry, ...history].slice(0, 8);
+    const nextHistory = [entry, ...history].slice(0, 12);
     setHistory(nextHistory);
     window.localStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory));
 
@@ -365,19 +397,36 @@ export default function HomePage() {
       return;
     }
 
-    const { error: saveError } = await supabase.from("generations").insert({
+    const payload = payloadForMode(mode);
+    const { data: project, error: projectError } = await supabase
+      .from("projects")
+      .insert({ user_id: user.id, kind: mode, title: entry.title })
+      .select("id")
+      .single();
+
+    const { error: generationError } = await supabase.from("generations").insert({
       user_id: user.id,
+      project_id: projectError ? null : project?.id,
       mode,
       title: entry.title,
       input: activeInput,
       output: generated,
-      metadata: payloadForMode(mode),
+      metadata: payload,
     });
 
-    setSyncStatus(saveError ? "Saved locally. Cloud save needs the Supabase schema." : "Saved to cloud history.");
+    await supabase.from("usage_events").insert({
+      user_id: user.id,
+      mode,
+      input_chars: activeInput.length,
+      output_chars: generated.length,
+      model: "openrouter",
+    });
+
+    setSyncStatus(generationError ? "Saved locally. Cloud save needs the Supabase schema." : "Saved to cloud history.");
   }
 
   function openHistoryEntry(entry: HistoryEntry) {
+    setStudioOpen(true);
     setMode(entry.mode);
     setOutput(entry.output);
     setError("");
@@ -426,15 +475,7 @@ export default function HomePage() {
       <div className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col lg:flex-row">
         <aside className="border-b border-stone-200/80 bg-[#fbf7ef]/85 px-4 py-4 backdrop-blur lg:sticky lg:top-0 lg:h-screen lg:w-72 lg:shrink-0 lg:border-b-0 lg:border-r lg:px-5 lg:py-6">
           <div className="flex items-center justify-between gap-4 lg:block">
-            <div className="flex items-center gap-2">
-              <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-stone-300 bg-stone-950 text-sm font-semibold text-white shadow-sm">
-                AI
-              </div>
-              <div>
-                <p className="text-sm font-semibold tracking-tight text-stone-950">AssignAI</p>
-                <p className="hidden text-xs text-stone-500 sm:block">Writing and presentation studio</p>
-              </div>
-            </div>
+            <LogoBlock />
             <div className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 lg:mt-5 lg:inline-flex">
               Beta
             </div>
@@ -458,24 +499,11 @@ export default function HomePage() {
             </a>
           </nav>
 
-          <AccountPanel
-            authMode={authMode}
-            authStatus={authStatus}
-            email={email}
-            password={password}
-            supabaseReady={hasSupabaseConfig()}
-            syncStatus={syncStatus}
-            user={user}
-            onAuthModeChange={setAuthMode}
-            onEmailChange={setEmail}
-            onPasswordChange={setPassword}
-            onSignOut={signOut}
-            onSubmit={handleAuth}
-          />
+          <AccountPanel {...authProps} />
 
           <div id="history" className="mt-4 hidden rounded-3xl border border-stone-200 bg-white/55 p-4 shadow-sm lg:block">
             <div className="mb-3 flex items-center justify-between">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">History</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Saved</p>
               <span className="h-2 w-2 rounded-full bg-stone-300" />
             </div>
             <div className="space-y-2 text-sm text-stone-500">
@@ -489,17 +517,22 @@ export default function HomePage() {
         </aside>
 
         <section className="flex-1 px-4 py-8 sm:px-6 lg:px-10 lg:py-10">
-          <div className="mx-auto flex max-w-4xl flex-col gap-6">
-            <header className="pt-4 text-center sm:pt-10 lg:pt-16">
-              <p className="mx-auto mb-4 inline-flex rounded-full border border-stone-200 bg-white/65 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-stone-500 shadow-sm">
-                {copy.eyebrow}
-              </p>
-              <h1 className="mx-auto max-w-3xl text-4xl font-semibold tracking-[-0.04em] text-stone-950 sm:text-5xl lg:text-6xl">
-                What do you want to create today?
-              </h1>
-              <p className="mx-auto mt-4 max-w-2xl text-sm leading-6 text-stone-600 sm:text-base">
-                Generate structured assignments, rewrite stiff text, and export presentation-ready PowerPoint decks.
-              </p>
+          <div className="mx-auto flex max-w-5xl flex-col gap-6">
+            <header className="flex flex-col gap-4 pt-2 sm:pt-6 lg:flex-row lg:items-end lg:justify-between lg:pt-10">
+              <div>
+                <p className="mb-3 inline-flex rounded-full border border-stone-200 bg-white/65 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-stone-500 shadow-sm">
+                  {copy.eyebrow}
+                </p>
+                <h1 className="max-w-2xl text-4xl font-semibold tracking-[-0.04em] text-stone-950 sm:text-5xl">
+                  Build the work, keep the record.
+                </h1>
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-stone-600 sm:text-base">
+                  Create assignments, humanize drafts, and build presentation outlines. Signed-in users get cloud history automatically.
+                </p>
+              </div>
+              <div className="rounded-2xl border border-stone-200 bg-white/70 px-4 py-3 text-sm text-stone-600 shadow-sm">
+                <span className="font-semibold text-stone-950">{history.length}</span> saved item{history.length === 1 ? "" : "s"}
+              </div>
             </header>
 
             <form onSubmit={handleSubmit} className="rounded-[2rem] border border-stone-200 bg-[#fffdf8] p-3 shadow-[0_24px_80px_rgba(68,53,35,0.10)]">
@@ -554,7 +587,7 @@ export default function HomePage() {
                   <>
                     <SelectField label="Tone" value={humanizerTone} onChange={setHumanizerTone} options={humanizerTones} />
                     <div className="hidden rounded-2xl border border-dashed border-stone-200 bg-stone-50/60 px-3 py-2 text-xs text-stone-500 sm:block lg:col-span-3">
-                      Tip: keep original details in the text so the rewrite stays faithful to your meaning.
+                      Paste the original text. The output will only contain the rewritten version.
                     </div>
                   </>
                 ) : null}
@@ -654,8 +687,8 @@ export default function HomePage() {
                 ) : (
                   <div className="flex h-full min-h-[18rem] flex-col items-center justify-center text-center text-stone-500">
                     <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border border-stone-200 bg-[#fbf7ef] text-xl">✦</div>
-                    <p className="font-medium text-stone-800">Your output will appear below the composer.</p>
-                    <p className="mt-2 max-w-sm text-sm">Choose a tool, add your prompt, and review or edit the generated result here.</p>
+                    <p className="font-medium text-stone-800">Your output will appear here.</p>
+                    <p className="mt-2 max-w-sm text-sm">Choose a tool, add your prompt, and review or edit the generated result.</p>
                   </div>
                 )}
               </div>
@@ -669,7 +702,7 @@ export default function HomePage() {
             </section>
 
             <section className="rounded-[2rem] border border-stone-200 bg-white/55 p-5 shadow-sm lg:hidden">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">History</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Saved</p>
               <div className="mt-3 grid gap-2 sm:grid-cols-2">
                 {history.length > 0 ? (
                   history.map((entry) => <HistoryButton key={entry.id} entry={entry} onClick={() => openHistoryEntry(entry)} />)
@@ -685,23 +718,84 @@ export default function HomePage() {
   );
 }
 
-function inputErrorForMode(mode: Mode): string {
-  if (mode === "assignment") return "Paste the assignment brief or describe what you need to write.";
-  if (mode === "humanizer") return "Paste text to humanize.";
-  return "Describe the presentation you want created.";
+function LandingPage({
+  authProps,
+  onTry,
+}: {
+  authProps: AccountPanelProps;
+  onTry: () => void;
+}) {
+  return (
+    <main className="min-h-screen bg-[#f7f1e8] text-stone-950">
+      <div className="mx-auto flex min-h-screen w-full max-w-6xl flex-col px-4 py-6 sm:px-6 lg:px-8">
+        <header className="flex items-center justify-between border-b border-stone-200/80 pb-4">
+          <LogoBlock />
+          <button
+            type="button"
+            onClick={onTry}
+            className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 shadow-sm transition hover:border-stone-300 hover:bg-stone-50"
+          >
+            Try without account
+          </button>
+        </header>
+
+        <section className="grid flex-1 items-center gap-8 py-10 lg:grid-cols-[1.05fr_0.95fr] lg:py-16">
+          <div>
+            <p className="mb-4 inline-flex rounded-full border border-stone-200 bg-white/70 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-stone-500 shadow-sm">
+              Assignment writing studio
+            </p>
+            <h1 className="max-w-3xl text-5xl font-semibold tracking-[-0.05em] text-stone-950 sm:text-6xl lg:text-7xl">
+              Write, polish, and present your work in one place.
+            </h1>
+            <p className="mt-5 max-w-2xl text-base leading-7 text-stone-600 sm:text-lg">
+              AssignAI turns briefs into structured drafts, rewrites stiff text into clearer prose, and creates PowerPoint-ready outlines with export tools built in.
+            </p>
+            <div className="mt-8 grid gap-3 sm:grid-cols-3">
+              <FeatureTile title="Assignment Writer" body="Brief, rubric, sources, section plan, draft, final checks." />
+              <FeatureTile title="Humanizer" body="Paste text and get a cleaner version back without extra notes." />
+              <FeatureTile title="PowerPoint" body="Generate slide plans and export a real PPTX deck." />
+            </div>
+          </div>
+
+          <div className="rounded-[2rem] border border-stone-200 bg-[#fffdf8] p-4 shadow-[0_24px_80px_rgba(68,53,35,0.12)] sm:p-5">
+            <div className="mb-5 rounded-3xl bg-stone-950 p-5 text-white">
+              <p className="text-sm font-semibold text-stone-200">Start free</p>
+              <h2 className="mt-2 text-3xl font-semibold tracking-tight">Create your workspace</h2>
+              <p className="mt-3 text-sm leading-6 text-stone-300">
+                Sign up to save assignments, humanized drafts, and presentations to your cloud history.
+              </p>
+            </div>
+            <AccountPanel {...authProps} compact />
+            <button
+              type="button"
+              onClick={onTry}
+              className="mt-3 w-full rounded-full border border-stone-200 bg-white px-4 py-3 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50"
+            >
+              Continue without saving
+            </button>
+          </div>
+        </section>
+      </div>
+    </main>
+  );
 }
 
-function footerForMode(mode: Mode): string {
-  if (mode === "assignment") return "Assignment Writer analyzes the brief, plans sections, writes them, then humanizes the final draft.";
-  if (mode === "humanizer") return "Humanizer rewrites pasted text and returns only the improved version.";
-  return "PowerPoint Creator builds a slide outline first, then exports a `.pptx` deck.";
-}
-
-function loadingTextForMode(mode: Mode): string {
-  if (mode === "assignment") return "Analyzing and writing...";
-  if (mode === "humanizer") return "Humanizing text...";
-  return "Creating slides...";
-}
+type AccountPanelProps = {
+  authMode: AuthMode;
+  authStatus: string;
+  email: string;
+  password: string;
+  supabaseReady: boolean;
+  syncStatus: string;
+  user: User | null;
+  authLoading: boolean;
+  compact?: boolean;
+  onAuthModeChange: (mode: AuthMode) => void;
+  onEmailChange: (value: string) => void;
+  onPasswordChange: (value: string) => void;
+  onSignOut: () => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+};
 
 function AccountPanel({
   authMode,
@@ -711,33 +805,24 @@ function AccountPanel({
   supabaseReady,
   syncStatus,
   user,
+  authLoading,
+  compact = false,
   onAuthModeChange,
   onEmailChange,
   onPasswordChange,
   onSignOut,
   onSubmit,
-}: {
-  authMode: AuthMode;
-  authStatus: string;
-  email: string;
-  password: string;
-  supabaseReady: boolean;
-  syncStatus: string;
-  user: User | null;
-  onAuthModeChange: (mode: AuthMode) => void;
-  onEmailChange: (value: string) => void;
-  onPasswordChange: (value: string) => void;
-  onSignOut: () => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-}) {
+}: AccountPanelProps) {
   return (
-    <section className="mt-4 rounded-3xl border border-stone-200 bg-white/55 p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Account</p>
-        <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${user ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-stone-500"}`}>
-          {user ? "Synced" : "Local"}
-        </span>
-      </div>
+    <section className={compact ? "" : "mt-4 rounded-3xl border border-stone-200 bg-white/55 p-4 shadow-sm"}>
+      {!compact ? (
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Account</p>
+          <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${user ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-stone-500"}`}>
+            {user ? "Synced" : "Local"}
+          </span>
+        </div>
+      ) : null}
 
       {!supabaseReady ? (
         <p className="text-xs leading-5 text-stone-500">Add Supabase env vars to enable login and cloud history.</p>
@@ -760,17 +845,17 @@ function AccountPanel({
           <div className="flex gap-1 rounded-full border border-stone-200 bg-white p-1">
             <button
               type="button"
-              onClick={() => onAuthModeChange("sign-in")}
-              className={`flex-1 rounded-full px-2 py-1.5 text-xs font-semibold ${authMode === "sign-in" ? "bg-stone-950 text-white" : "text-stone-500"}`}
-            >
-              Sign in
-            </button>
-            <button
-              type="button"
               onClick={() => onAuthModeChange("sign-up")}
               className={`flex-1 rounded-full px-2 py-1.5 text-xs font-semibold ${authMode === "sign-up" ? "bg-stone-950 text-white" : "text-stone-500"}`}
             >
               Sign up
+            </button>
+            <button
+              type="button"
+              onClick={() => onAuthModeChange("sign-in")}
+              className={`flex-1 rounded-full px-2 py-1.5 text-xs font-semibold ${authMode === "sign-in" ? "bg-stone-950 text-white" : "text-stone-500"}`}
+            >
+              Sign in
             </button>
           </div>
           <input
@@ -790,14 +875,56 @@ function AccountPanel({
           {authStatus ? <p className="text-xs leading-5 text-stone-500">{authStatus}</p> : null}
           <button
             type="submit"
-            className="w-full rounded-full bg-stone-950 px-3 py-2 text-sm font-semibold text-white transition hover:bg-stone-800"
+            disabled={authLoading}
+            className="w-full rounded-full bg-stone-950 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {authMode === "sign-in" ? "Sign in" : "Create account"}
+            {authLoading ? "Working..." : authMode === "sign-in" ? "Sign in" : "Create free account"}
           </button>
         </form>
       )}
     </section>
   );
+}
+
+function LogoBlock() {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex h-8 w-8 items-center justify-center rounded-xl border border-stone-300 bg-stone-950 text-sm font-semibold text-white shadow-sm">
+        AI
+      </div>
+      <div>
+        <p className="text-sm font-semibold tracking-tight text-stone-950">AssignAI</p>
+        <p className="hidden text-xs text-stone-500 sm:block">Writing and presentation studio</p>
+      </div>
+    </div>
+  );
+}
+
+function FeatureTile({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="rounded-2xl border border-stone-200 bg-white/70 p-4 shadow-sm">
+      <p className="text-sm font-semibold text-stone-950">{title}</p>
+      <p className="mt-2 text-xs leading-5 text-stone-500">{body}</p>
+    </div>
+  );
+}
+
+function inputErrorForMode(mode: Mode): string {
+  if (mode === "assignment") return "Paste the assignment brief or describe what you need to write.";
+  if (mode === "humanizer") return "Paste text to humanize.";
+  return "Describe the presentation you want created.";
+}
+
+function footerForMode(mode: Mode): string {
+  if (mode === "assignment") return "Assignment Writer analyzes the brief, plans sections, writes them, then humanizes the final draft.";
+  if (mode === "humanizer") return "Humanizer rewrites pasted text and returns only the improved version.";
+  return "PowerPoint Creator builds a slide outline first, then exports a `.pptx` deck.";
+}
+
+function loadingTextForMode(mode: Mode): string {
+  if (mode === "assignment") return "Analyzing and writing...";
+  if (mode === "humanizer") return "Humanizing text...";
+  return "Creating slides...";
 }
 
 function SidebarButton({
