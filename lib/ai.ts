@@ -13,18 +13,12 @@ type GenerateResponse = {
   status: number;
 };
 
-type OpenRouterResponse = {
-  choices?: Array<{
-    message?: {
-      content?: string;
-    };
-  }>;
-  error?: {
-    message?: string;
-  };
+type ChatResponse = {
+  choices?: Array<{ message?: { content?: string } }>;
+  error?: { message?: string };
 };
 
-type OpenRouterCall = {
+type ChatCall = {
   system: string;
   prompt: string;
   temperature: number;
@@ -33,11 +27,11 @@ type OpenRouterCall = {
   config: ReturnType<typeof getConfig>;
 };
 
-type OpenRouterCallResult = {
+type ChatCallResult = {
   ok: boolean;
   status: number;
   text: string;
-  raw?: OpenRouterResponse;
+  raw?: ChatResponse;
   error?: string;
 };
 
@@ -87,10 +81,7 @@ export async function generateResult({ kind, input, payload, requestId }: Genera
   const config = getConfig();
 
   if (config.ai.provider === "mock" || !config.ai.openRouterApiKey) {
-    return {
-      status: 200,
-      result: mockResult(kind, input, payload, requestId),
-    };
+    return { status: 200, result: mockResult(kind, input, payload, requestId) };
   }
 
   if (kind === "assignment") {
@@ -184,6 +175,7 @@ Rules:
 - Follow the section plan and word counts as closely as possible.
 - Use markdown headings for every assignment section.
 - Use clear headings that match the section plan.
+- You must write every section in the section plan. Do not stop after the introduction.
 - Use only source details the user supplied. Do not invent books, journal articles, URLs, DOI values, page numbers, quotes, statistics, or named authors.
 - When evidence is needed but the user did not provide a source, use a placeholder like [Add source: author/year for claim about X].
 - At the end of every drafted section, include a short list headed "References used in this section".
@@ -194,12 +186,21 @@ Rules:
   if (!sectionDraft.ok) return assignmentStageError("section drafting", sectionDraft, requestId, config.ai.provider);
 
   const sectionTargets = extractSectionTargets(analysis.text, targetWords);
-  const sectionVerification = await verifySectionWordCounts({
+  const completedSectionDraft = await completeMissingDraftSections({
     config,
     requestId,
     sharedContext,
     analysis: analysis.text,
     sectionDraft: sectionDraft.text,
+    sectionTargets,
+  });
+
+  const sectionVerification = await verifySectionWordCounts({
+    config,
+    requestId,
+    sharedContext,
+    analysis: analysis.text,
+    sectionDraft: completedSectionDraft.draft,
     sectionTargets,
   });
   const verifiedSectionDraft = sectionVerification.draft;
@@ -307,6 +308,7 @@ ${wordCountSection}
         pipeline: [
           "analysis",
           "section-draft",
+          completedSectionDraft.addedCount > 0 ? "missing-section-fill" : "section-completeness-check",
           "section-word-count-check",
           sectionVerification.adjustedCount > 0 ? "section-rewrite-loop" : "section-check-pass",
           "humanize-draft",
@@ -317,6 +319,74 @@ ${wordCountSection}
         sectionWordCounts: sectionVerification.reports,
       },
     },
+  };
+}
+
+async function completeMissingDraftSections({
+  config,
+  requestId,
+  sharedContext,
+  analysis,
+  sectionDraft,
+  sectionTargets,
+}: {
+  config: ReturnType<typeof getConfig>;
+  requestId: string;
+  sharedContext: string;
+  analysis: string;
+  sectionDraft: string;
+  sectionTargets: SectionTarget[];
+}): Promise<{ draft: string; addedCount: number }> {
+  if (!sectionTargets.length) return { draft: sectionDraft, addedCount: 0 };
+
+  const completedSections = splitDraftSections(sectionDraft);
+  let addedCount = 0;
+
+  for (let index = 0; index < sectionTargets.length; index += 1) {
+    const target = sectionTargets[index];
+    const alreadyDrafted = completedSections.some((section) => titleMatches(normalizeTitle(section.title), normalizeTitle(target.title)));
+    if (alreadyDrafted) continue;
+
+    const generated = await callOpenRouter({
+      config,
+      requestId,
+      stage: `missing-section-${index + 1}`,
+      temperature: 0.3,
+      system: assignmentPipelineSystem("missing section draft"),
+      prompt: `${sharedContext}
+
+The section-by-section draft is missing one planned section. Draft only the missing section.
+
+Approved analysis and plan:
+${analysis}
+
+Current draft:
+${sectionDraft}
+
+Missing section title: ${target.title}
+Target for this section: ${target.target} words
+
+Rules:
+- Return only this missing section.
+- Start with a markdown heading that matches the missing section title.
+- Aim for the target word count.
+- Use only source details the user supplied.
+- Do not invent books, journal articles, URLs, DOI values, page numbers, quotes, statistics, or named authors.
+- If evidence is needed but no source details were supplied, use placeholders like [Add source: author/year for claim about X].
+- End with a short list headed "References used in this section".`,
+    });
+
+    if (generated.ok && generated.text) {
+      completedSections.push(normalizeRewrittenSection(generated.text, target.title));
+      addedCount += 1;
+    }
+  }
+
+  if (!completedSections.length) return { draft: sectionDraft, addedCount };
+
+  return {
+    draft: orderSectionsByPlan(completedSections, sectionTargets).map((section) => section.content.trim()).join("\n\n"),
+    addedCount,
   };
 }
 
@@ -344,7 +414,8 @@ async function verifySectionWordCounts({
 
   for (let index = 0; index < sourceSections.length; index += 1) {
     const original = sourceSections[index];
-    const target = targets[index] || { title: original.title, target: Math.max(250, Math.round(getTotalTarget(sectionTargets) / sourceSections.length)) };
+    const fallbackTarget = Math.max(50, Math.round((getTotalTarget(sectionTargets) || 1000) / sourceSections.length));
+    const target = targets[index] || { title: original.title, target: fallbackTarget };
     let section = original;
     let report = buildWordCountReport(stripReferenceBlocks(section.content), target.target);
     let attempts = 0;
@@ -403,14 +474,7 @@ ${section.content}`,
   };
 }
 
-async function callOpenRouter({
-  config,
-  requestId,
-  system,
-  prompt,
-  temperature,
-  stage,
-}: OpenRouterCall): Promise<OpenRouterCallResult> {
+async function callOpenRouter({ config, requestId, system, prompt, temperature, stage }: ChatCall): Promise<ChatCallResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.ai.timeoutMs);
 
@@ -422,9 +486,7 @@ async function callOpenRouter({
       "x-title": config.ai.appTitle,
     };
 
-    if (config.ai.appUrl) {
-      headers["http-referer"] = config.ai.appUrl;
-    }
+    if (config.ai.appUrl) headers["http-referer"] = config.ai.appUrl;
 
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -440,8 +502,8 @@ async function callOpenRouter({
       signal: controller.signal,
     });
 
-    const raw = (await response.json().catch(() => ({}))) as OpenRouterResponse;
-    const text = normalizeOpenRouterText(raw);
+    const raw = (await response.json().catch(() => ({}))) as ChatResponse;
+    const text = normalizeChatText(raw);
 
     if (!response.ok) {
       return {
@@ -467,12 +529,7 @@ async function callOpenRouter({
   }
 }
 
-function assignmentStageError(
-  stage: string,
-  response: OpenRouterCallResult,
-  requestId: string,
-  provider: string,
-): GenerateResponse {
+function assignmentStageError(stage: string, response: ChatCallResult, requestId: string, provider: string): GenerateResponse {
   return {
     status: 502,
     result: {
@@ -519,9 +576,7 @@ User-selected settings:
 }
 
 function systemPromptFor(kind: ToolKind): string {
-  if (kind === "assignment") {
-    return assignmentPipelineSystem("single-call-fallback");
-  }
+  if (kind === "assignment") return assignmentPipelineSystem("single-call-fallback");
 
   if (kind === "humanize") {
     return `You are AssignAI's Humanizer. The user will paste text. Return only the humanized version of that text.
@@ -544,9 +599,7 @@ ${HUMANIZER_POLICY}`;
 }
 
 function buildUserPrompt(kind: ToolKind, input: string, payload: Record<string, unknown>): string {
-  if (kind === "assignment") {
-    return assignmentContext(input, payload, getTargetWordCount(payload));
-  }
+  if (kind === "assignment") return assignmentContext(input, payload, getTargetWordCount(payload));
 
   if (kind === "humanize") {
     return `Humanize the text below.
@@ -569,7 +622,7 @@ Style: ${stringValue(payload.style, "Academic briefing")}
 Return numbered slides. For each slide include: slide title, 3 concise bullets, suggested visual, and speaker notes. Apply the natural writing policy to slide text and notes.`;
 }
 
-function normalizeOpenRouterText(raw: OpenRouterResponse): string {
+function normalizeChatText(raw: ChatResponse): string {
   return raw.choices?.[0]?.message?.content?.trim() || "";
 }
 
@@ -639,11 +692,12 @@ The conclusion should synthesize the argument rather than repeat each paragraph.
 # Writing Plan
 1. Analyze the brief and rubric.
 2. Draft each section using the section word count targets.
-3. Check every section with code before humanizing.
-4. Rewrite any section that is outside its 10% range.
-5. Humanize the verified draft while preserving citations and placeholders.
-6. Sort the extracted references alphabetically.
-7. Run the code-based final word count check.
+3. Fill any missing planned section before checking word counts.
+4. Check every section with code before humanizing.
+5. Rewrite any section that is outside its 10% range.
+6. Humanize the verified draft while preserving citations and placeholders.
+7. Sort the extracted references alphabetically.
+8. Run the code-based final word count check.
 
 # Section-by-Section Draft
 ${draft}
@@ -669,17 +723,11 @@ ${formatWordCountReport(wordReport, false)}
     };
   }
 
-  if (kind === "humanize") {
-    return {
-      ok: true,
-      result: humanizeFallback(input),
-      raw: { mock: true, kind, requestId },
-    };
-  }
+  if (kind === "humanize") return { ok: true, result: humanizeFallback(input), raw: { mock: true, kind, requestId } };
 
   return {
     ok: true,
-    result: `Mock PowerPoint outline\n\nSlide 1: ${shortTitle(input)}\n- Introduce the topic\n- State the central argument\n- Preview the structure\nSuggested visual: Clean title slide\nSpeaker notes: Open by explaining why this topic matters.\n\nSlide 2: Context\n- Define key terms\n- Summarize background\n- Identify the debate\nSuggested visual: Timeline or concept map\nSpeaker notes: Give the audience enough context to follow the argument.\n\nSlide 3: Main Evidence\n- Present one core source\n- Explain the finding\n- Link it to your argument\nSuggested visual: Quote, chart, or source card\nSpeaker notes: Focus on analysis rather than reading the slide.\n\nSlide 4: Conclusion\n- Return to the thesis\n- Name the strongest takeaway\n- End with an implication\nSuggested visual: Final summary statement\nSpeaker notes: Close clearly and avoid introducing new material.`,
+    result: `Mock PowerPoint outline\n\nSlide 1: ${shortTitle(input)}\n- Introduce the topic\n- State the central argument\n- Preview the structure\nSuggested visual: Clean title slide\nSpeaker notes: Open by explaining why this topic matters.`,
     raw: { mock: true, kind, requestId },
   };
 }
@@ -690,9 +738,9 @@ function extractSectionTargets(analysis: string, totalTarget: number): SectionTa
 
   for (const line of sectionPlan.split(/\r?\n/)) {
     const cleaned = line.trim().replace(/^[-*]\s+/, "");
-    const match = cleaned.match(/^(.{2,80}?):\s*(\d{2,5})\s*words?\b/i)
-      || cleaned.match(/^(.{2,80}?)\s*-\s*(\d{2,5})\s*words?\b/i)
-      || cleaned.match(/^(.{2,80}?)\s*\((\d{2,5})\s*words?\)/i);
+    const match = cleaned.match(/^(.{2,100}?):\s*(\d{2,5})\s*words?\b/i)
+      || cleaned.match(/^(.{2,100}?)\s*-\s*(\d{2,5})\s*words?\b/i)
+      || cleaned.match(/^(.{2,100}?)\s*\((\d{2,5})\s*words?\)/i);
 
     if (!match) continue;
     const title = match[1].replace(/^#+\s*/, "").trim();
@@ -743,7 +791,7 @@ function splitDraftSections(text: string): DraftSection[] {
   for (const line of lines) {
     const heading = line.match(/^(#{2,4})\s+(.+)$/);
     if (heading) {
-      if (currentLines.length) {
+      if (currentLines.join("\n").trim()) {
         sections.push({ title: currentTitle || `Section ${sections.length + 1}`, content: currentLines.join("\n").trim() });
       }
       currentTitle = heading[2].trim();
@@ -776,6 +824,22 @@ function alignSectionTargets(sections: DraftSection[], targets: SectionTarget[])
 
     return targets[index] || { title: section.title, target: Math.max(50, Math.round(getTotalTarget(targets) / sections.length)) };
   });
+}
+
+function orderSectionsByPlan(sections: DraftSection[], targets: SectionTarget[]): DraftSection[] {
+  if (!targets.length) return sections;
+  const remaining = [...sections];
+  const ordered: DraftSection[] = [];
+
+  for (const target of targets) {
+    const matchedIndex = remaining.findIndex((section) => titleMatches(normalizeTitle(section.title), normalizeTitle(target.title)));
+    if (matchedIndex >= 0) {
+      const [matched] = remaining.splice(matchedIndex, 1);
+      ordered.push(matched);
+    }
+  }
+
+  return [...ordered, ...remaining];
 }
 
 function normalizeRewrittenSection(text: string, expectedTitle: string): DraftSection {
@@ -815,11 +879,8 @@ function stripReferenceBlocks(text: string): string {
     }
 
     if (inReferenceBlock) {
-      if (!trimmed || /^#{1,4}\s+/.test(trimmed)) {
-        inReferenceBlock = false;
-      } else {
-        continue;
-      }
+      if (!trimmed || /^#{1,4}\s+/.test(trimmed)) inReferenceBlock = false;
+      else continue;
     }
 
     if (!inReferenceBlock) kept.push(line);
@@ -845,13 +906,7 @@ function buildWordCountReport(text: string, target: number): WordCountReport {
   const lower = Math.ceil(target * 0.9);
   const upper = Math.floor(target * 1.1);
 
-  return {
-    target,
-    lower,
-    upper,
-    actual,
-    withinRange: actual >= lower && actual <= upper,
-  };
+  return { target, lower, upper, actual, withinRange: actual >= lower && actual <= upper };
 }
 
 function countWords(text: string): number {
@@ -890,9 +945,7 @@ function extractReferenceCandidates(text: string): string[] {
   for (const line of lines) {
     const trimmed = line.trim();
 
-    if (/^#{1,4}\s+/.test(trimmed) && !/references? used|references?|sources?/i.test(trimmed)) {
-      inReferenceBlock = false;
-    }
+    if (/^#{1,4}\s+/.test(trimmed) && !/references? used|references?|sources?/i.test(trimmed)) inReferenceBlock = false;
 
     if (/^(#{1,4}\s*)?(references? used in this section|references?|sources?)\b/i.test(trimmed)) {
       inReferenceBlock = true;
@@ -909,11 +962,8 @@ function extractReferenceCandidates(text: string): string[] {
       if (isReferenceLike(cleaned)) candidates.add(cleaned);
     }
 
-    for (const match of trimmed.matchAll(/\[Add source:[^\]]+\]/gi)) {
-      candidates.add(match[0].trim());
-    }
-
-    for (const match of trimmed.matchAll(/\(([A-Z][A-Za-z' -]+,\s*\d{4}[a-z]?)(?:,\s*[^)]*)?\)/g)) {
+    for (const match of Array.from(trimmed.matchAll(/\[Add source:[^\]]+\]/gi))) candidates.add(match[0].trim());
+    for (const match of Array.from(trimmed.matchAll(/\(([A-Z][A-Za-z' -]+,\s*\d{4}[a-z]?)(?:,\s*[^)]*)?\)/g))) {
       candidates.add(`[Add full reference for: ${match[1]}]`);
     }
   }
@@ -931,11 +981,7 @@ function isReferenceLike(value: string): boolean {
 }
 
 function cleanReferenceLine(line: string): string {
-  return line
-    .replace(/^[-*]\s+/, "")
-    .replace(/^\d+[.)]\s+/, "")
-    .replace(/^["']|["']$/g, "")
-    .trim();
+  return line.replace(/^[-*]\s+/, "").replace(/^\d+[.)]\s+/, "").replace(/^["']|["']$/g, "").trim();
 }
 
 function sortReferencesAlphabetically(references: string[]): string[] {
@@ -962,10 +1008,7 @@ function referenceSortKey(reference: string): string {
 
 function formatAlphabetizedReferences(references: string[], citationStyle: string): string {
   const sorted = sortReferencesAlphabetically(references);
-  const body = sorted.length
-    ? sorted.map((reference) => `- ${reference}`).join("\n")
-    : "- [Add source: author/year for each claim that needs evidence]";
-
+  const body = sorted.length ? sorted.map((reference) => `- ${reference}`).join("\n") : "- [Add source: author/year for each claim that needs evidence]";
   return `# Alphabetized References
 Citation style: ${citationStyle}
 
