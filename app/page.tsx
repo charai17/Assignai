@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 
 type Mode = "assignment" | "humanizer" | "powerpoint";
 
@@ -13,6 +13,16 @@ type ApiResponse = {
   message?: string;
 };
 
+type HistoryEntry = {
+  id: string;
+  mode: Mode;
+  title: string;
+  preview: string;
+  output: string;
+  createdAt: string;
+};
+
+const HISTORY_KEY = "assignai-history";
 const levels = ["High School", "College", "University", "Graduate"];
 const wordCounts = ["500", "750", "1000", "1500", "2000"];
 const assignmentTones = ["Academic", "Analytical", "Persuasive", "Informative", "Professional"];
@@ -62,10 +72,21 @@ export default function HomePage() {
   const [slideCount, setSlideCount] = useState(slideCounts[2]);
   const [deckStyle, setDeckStyle] = useState(deckStyles[0]);
   const [audience, setAudience] = useState(audiences[0]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [output, setOutput] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem(HISTORY_KEY);
+      if (saved) setHistory(JSON.parse(saved) as HistoryEntry[]);
+    } catch {
+      window.localStorage.removeItem(HISTORY_KEY);
+    }
+  }, []);
 
   const activeInput = useMemo(() => {
     if (mode === "assignment") return assignmentPrompt.trim();
@@ -86,13 +107,10 @@ export default function HomePage() {
 
     setLoading(true);
     try {
-      const endpoint = endpointForMode(mode);
-      const payload = payloadForMode(mode);
-
-      const response = await fetch(endpoint, {
+      const response = await fetch(endpointForMode(mode), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payloadForMode(mode)),
       });
 
       let data: ApiResponse = {};
@@ -109,6 +127,7 @@ export default function HomePage() {
       const generated = data.output || data.result || data.text || "";
       if (!generated) throw new Error("No output was returned from the server.");
       setOutput(generated);
+      saveHistory(generated);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {
@@ -134,10 +153,68 @@ export default function HomePage() {
     URL.revokeObjectURL(url);
   }
 
+  async function downloadPowerPoint() {
+    if (mode !== "powerpoint" || (!activeInput && !output)) return;
+    setError("");
+    setDownloading(true);
+
+    try {
+      const response = await fetch("/api/powerpoint/download", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...payloadForMode("powerpoint"), input: output || powerpointPrompt, deckText: output }),
+      });
+
+      if (!response.ok) {
+        let data: ApiResponse = {};
+        try {
+          data = (await response.json()) as ApiResponse;
+        } catch {
+          // Fall through to the generic message below.
+        }
+        throw new Error(data.result || data.error || data.message || "PowerPoint download failed.");
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "assignai-presentation.pptx";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "PowerPoint download failed.");
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   function switchMode(nextMode: Mode) {
     setMode(nextMode);
     setError("");
     setOutput("");
+    setCopied(false);
+  }
+
+  function saveHistory(generated: string) {
+    const entry: HistoryEntry = {
+      id: crypto.randomUUID(),
+      mode,
+      title: activeInput.replace(/\s+/g, " ").slice(0, 48) || modeCopy[mode].label,
+      preview: generated.replace(/\s+/g, " ").slice(0, 90),
+      output: generated,
+      createdAt: new Date().toISOString(),
+    };
+
+    const nextHistory = [entry, ...history].slice(0, 8);
+    setHistory(nextHistory);
+    window.localStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory));
+  }
+
+  function openHistoryEntry(entry: HistoryEntry) {
+    setMode(entry.mode);
+    setOutput(entry.output);
+    setError("");
     setCopied(false);
   }
 
@@ -204,9 +281,11 @@ export default function HomePage() {
               <span className="h-2 w-2 rounded-full bg-stone-300" />
             </div>
             <div className="space-y-2 text-sm text-stone-500">
-              <HistoryItem title="No saved runs yet" meta="Generated outputs will appear here once persistence is added." />
-              <HistoryItem title="Assignment drafts" meta="Coming after saved projects are enabled." />
-              <HistoryItem title="Slide outlines" meta="Deck history will live here." />
+              {history.length > 0 ? (
+                history.map((entry) => <HistoryButton key={entry.id} entry={entry} onClick={() => openHistoryEntry(entry)} />)
+              ) : (
+                <HistoryItem title="No saved runs yet" meta="Generated outputs will appear here." />
+              )}
             </div>
           </div>
         </aside>
@@ -221,7 +300,7 @@ export default function HomePage() {
                 What do you want to create today?
               </h1>
               <p className="mx-auto mt-4 max-w-2xl text-sm leading-6 text-stone-600 sm:text-base">
-                Generate structured assignments, rewrite stiff text, and turn research into presentation-ready slide outlines.
+                Generate structured assignments, rewrite stiff text, and export presentation-ready PowerPoint decks.
               </p>
             </header>
 
@@ -274,7 +353,7 @@ export default function HomePage() {
                     <SelectField label="Slides" value={slideCount} onChange={setSlideCount} options={slideCounts} />
                     <SelectField label="Style" value={deckStyle} onChange={setDeckStyle} options={deckStyles} />
                     <div className="hidden rounded-2xl border border-dashed border-stone-200 bg-stone-50/60 px-3 py-2 text-xs text-stone-500 lg:block">
-                      Export-ready outline with bullets, visuals, and speaker notes.
+                      Generates an outline first, then exports a `.pptx` deck.
                     </div>
                   </>
                 ) : null}
@@ -307,14 +386,24 @@ export default function HomePage() {
                   <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">Output</p>
                   <h2 className="mt-1 text-2xl font-semibold tracking-tight text-stone-950">{copy.output}</h2>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
+                  {mode === "powerpoint" ? (
+                    <button
+                      type="button"
+                      onClick={downloadPowerPoint}
+                      disabled={downloading || (!output && !activeInput)}
+                      className="rounded-full border border-stone-900 bg-stone-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      {downloading ? "Building PPTX..." : "Download PPTX"}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={downloadOutput}
                     disabled={!output}
                     className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-semibold text-stone-700 transition hover:border-stone-300 hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-40"
                   >
-                    Download
+                    Download text
                   </button>
                   <button
                     type="button"
@@ -355,10 +444,12 @@ export default function HomePage() {
 
             <section className="rounded-[2rem] border border-stone-200 bg-white/55 p-5 shadow-sm lg:hidden">
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-stone-500">History</p>
-              <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                <HistoryItem title="No saved runs yet" meta="Generated outputs will appear here." />
-                <HistoryItem title="Assignment drafts" meta="Coming soon" />
-                <HistoryItem title="Slide outlines" meta="Coming soon" />
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {history.length > 0 ? (
+                  history.map((entry) => <HistoryButton key={entry.id} entry={entry} onClick={() => openHistoryEntry(entry)} />)
+                ) : (
+                  <HistoryItem title="No saved runs yet" meta="Generated outputs will appear here." />
+                )}
               </div>
             </section>
           </div>
@@ -443,6 +534,20 @@ function SelectField({
         ))}
       </select>
     </label>
+  );
+}
+
+function HistoryButton({ entry, onClick }: { entry: HistoryEntry; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="w-full rounded-2xl border border-stone-200 bg-white/70 p-3 text-left transition hover:border-stone-300 hover:bg-white"
+    >
+      <span className="block truncate text-sm font-medium text-stone-700">{entry.title}</span>
+      <span className="mt-1 block text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-400">{modeCopy[entry.mode].label}</span>
+      <span className="mt-1 block text-xs leading-5 text-stone-500">{entry.preview}</span>
+    </button>
   );
 }
 
