@@ -10,7 +10,11 @@ export async function GET() {
     ok: true,
     service: config.serviceName,
     provider: config.ai.provider,
-    model: config.ai.provider === "openrouter" ? config.ai.openRouterModel : "mock",
+    model: config.ai.provider === "openai"
+      ? config.ai.openAiModel
+      : config.ai.provider === "openrouter"
+        ? config.ai.openRouterModel
+        : "mock",
     time: new Date().toISOString(),
   });
 }
