@@ -1,11 +1,16 @@
-# Assignment + Humanizer Website
+# AssignAI
 
-Simple Next.js website that lets users generate assignments or humanize text through your n8n agents.
+AssignAI is a focused writing and presentation studio with three tools:
 
-## Run locally/on VPS
+- Assignment Writer: creates structured academic drafts from a prompt, level, word target, tone, and subject.
+- Humanizer: rewrites stiff text so it reads more naturally while preserving meaning.
+- PowerPoint Creator: turns a topic into a slide-by-slide outline with bullets, visuals, and speaker notes.
+
+The UI is built with Next.js, React, TypeScript, and Tailwind CSS. The backend is now owned by the app directly instead of n8n webhooks.
+
+## Run Locally
 
 ```bash
-cd /opt/hermes/assignment-humanizer
 npm install
 cp .env.example .env.local
 npm run dev
@@ -17,85 +22,43 @@ Open:
 http://localhost:3000
 ```
 
-## Connect n8n
+## Backend
 
-Edit `.env.local`:
-
-```env
-N8N_ASSIGNMENT_WEBHOOK_URL=https://your-n8n-domain.com/webhook/assignment
-N8N_HUMANIZER_WEBHOOK_URL=https://your-n8n-domain.com/webhook/humanizer
-```
-
-Optional auth header:
-
-```env
-N8N_WEBHOOK_AUTH_HEADER=x-api-key
-N8N_WEBHOOK_AUTH_VALUE=your-secret
-```
-
-## Payload sent to assignment webhook
-
-```json
-{
-  "input": "Write about climate change",
-  "prompt": "Write about climate change",
-  "level": "University",
-  "wordCount": 1000,
-  "tone": "Academic",
-  "subject": "Science"
-}
-```
-
-## Payload sent to humanizer webhook
-
-```json
-{
-  "input": "Text to rewrite",
-  "text": "Text to rewrite",
-  "tone": "Natural"
-}
-```
-
-## Accepted n8n response fields
-
-The app will display the first string it finds from:
+The app exposes these routes:
 
 ```text
-result, output, text, message, content, response, data[0], data
+POST /api/assignment
+POST /api/humanize
+POST /api/powerpoint
+GET  /api/health
 ```
 
-If webhook URLs are blank, the app runs in mock mode so the UI can be tested.
+All generation routes return JSON shaped as:
 
-## Backend production notes
+```json
+{ "ok": true, "result": "Generated text" }
+```
 
-The API routes intentionally stay lightweight and n8n-compatible:
+If `OPENAI_API_KEY` is not configured, the backend returns useful mock output so the UI can still be tested.
 
-- Frontend contract: `/api/assignment` and `/api/humanize` return JSON shaped as `{ ok: boolean, result: string, raw?: unknown }`.
-- Each request gets an `x-request-id` response header and the same `requestId` is forwarded to n8n.
-- Request bodies are validated as JSON objects with a non-empty `input` string (also accepts `text`, `assignment`, or `content` for compatibility).
-- n8n calls use a configurable timeout and a small retry for transient network/HTTP errors.
-- A simple in-memory fixed-window rate limiter protects the MVP without Redis.
-- Health check: `GET /api/health` returns `{ ok, service, time }`.
-
-Optional environment variables:
+## Environment
 
 ```env
-SERVICE_NAME=assignment-humanizer
-N8N_WEBHOOK_TIMEOUT_MS=30000
-N8N_WEBHOOK_RETRIES=1
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1-mini
+SERVICE_NAME=assignai
+AI_REQUEST_TIMEOUT_MS=45000
 MAX_INPUT_CHARS=20000
 RATE_LIMIT_WINDOW_MS=60000
 RATE_LIMIT_MAX_REQUESTS=20
 ```
 
-Production upgrade path when traffic grows:
+## Product Notes
 
-1. Replace the in-memory rate limiter with Redis/Upstash so limits work across Vercel/server instances.
-2. Add auth and abuse controls before public launch; later connect Stripe credits/subscriptions to enforce paid usage.
-3. Store requests/jobs in Postgres if users need history, retries, or dashboard visibility.
-4. Add a queue plus background workers if n8n workflows become slow or unreliable; return a job ID immediately and poll/stream results.
-5. Add structured logs/metrics around `requestId`, route, status, latency, and n8n response codes.
+AssignAI should remain a drafting and study-support tool. Generated content must be reviewed, fact-checked, and cited before use in academic work.
 
-Note: n8n `webhook-test` URLs can return 404 unless the workflow is actively waiting after clicking `Execute workflow`; that is an n8n workflow state issue, not necessarily an app failure.
+## Next Up
 
-Production `/webhook/...` URLs must have the n8n workflow activated with the editor toggle. If the app returns a message like `The requested webhook "POST assignment-writer" is not registered`, the website reached n8n successfully but the production workflow is not active yet. Activate the workflow in n8n, then retry the website/API call.
+- Saved project history and user accounts.
+- True `.pptx` file export after the slide-outline flow is validated.
+- Credits, payments, and usage limits before public launch.
