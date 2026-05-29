@@ -26,8 +26,8 @@ const HISTORY_KEY = "assignai-history";
 const levels = ["High School", "College", "University", "Graduate"];
 const wordCounts = ["500", "750", "1000", "1500", "2000"];
 const assignmentTones = ["Academic", "Analytical", "Persuasive", "Informative", "Professional"];
-const draftTypes = ["Full structured draft", "Detailed outline", "Improve my draft", "Plan only"];
-const citationStyles = ["Not specified", "Harvard", "APA 7", "MLA", "Chicago", "IEEE", "OSCOLA"];
+const draftTypes = ["Full staged draft", "Detailed plan only", "Improve my draft", "Section plan + draft"];
+const citationStyles = ["Auto-detect", "Harvard", "APA 7", "MLA", "Chicago", "IEEE", "OSCOLA"];
 const humanizerTones = ["Natural", "Conversational", "Professional", "Friendly", "Confident"];
 const subjects = ["General", "English", "History", "Science", "Business", "Technology", "Health"];
 const slideCounts = ["4", "5", "6", "8", "10", "12"];
@@ -38,10 +38,10 @@ const modeCopy: Record<Mode, { label: string; icon: string; eyebrow: string; out
   assignment: {
     label: "Assignment Writer",
     icon: "✍",
-    eyebrow: "Assignment workspace",
-    output: "Generated assignment",
-    cta: "Generate assignment",
-    placeholder: "Paste the assignment question or describe what you need to write. Add your argument if you already have one...",
+    eyebrow: "Assignment workflow",
+    output: "Analyzed, planned, written, humanized",
+    cta: "Analyze and write",
+    placeholder: "Paste the full assignment brief or question here. Include the task, topic, deadline notes, and anything your tutor specifically asked for...",
   },
   humanizer: {
     label: "Humanizer",
@@ -400,13 +400,13 @@ export default function HomePage() {
                       label="Rubric / marking criteria"
                       value={rubric}
                       onChange={setRubric}
-                      placeholder="Paste the marking criteria, learning outcomes, or tutor notes here."
+                      placeholder="Optional: paste marking criteria, learning outcomes, grade descriptors, or tutor notes."
                     />
                     <TextAreaField
-                      label="Sources / evidence notes"
+                      label="Extra information"
                       value={sources}
                       onChange={setSources}
-                      placeholder="Paste real sources, quotes, readings, links, or evidence notes. If empty, placeholders will be used."
+                      placeholder="Optional: paste source notes, required readings, your draft, tutor instructions, preferred argument, or evidence."
                     />
                   </>
                 ) : null}
@@ -440,14 +440,14 @@ export default function HomePage() {
 
               <div className="flex flex-col gap-3 border-t border-stone-100 px-2 pb-1 pt-3 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-xs text-stone-500">
-                  Drafting support only. Review facts, sources, and citations before using any output.
+                  Assignment Writer analyzes the brief, plans sections, writes them, then humanizes the final draft.
                 </p>
                 <button
                   type="submit"
                   disabled={loading}
                   className="inline-flex items-center justify-center rounded-full bg-stone-950 px-5 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-stone-800 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {loading ? "Working..." : copy.cta}
+                  {loading ? "Analyzing and writing..." : copy.cta}
                   <span className="ml-2">→</span>
                 </button>
               </div>
