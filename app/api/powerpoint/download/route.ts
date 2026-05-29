@@ -118,11 +118,9 @@ async function buildPresentation(slides: DeckSlide[]): Promise<Buffer> {
   pptx.company = "AssignAI";
   pptx.subject = "Generated academic presentation";
   pptx.title = slides[0]?.title || "AssignAI Presentation";
-  pptx.lang = "en-US";
   pptx.theme = {
     headFontFace: "Aptos Display",
     bodyFontFace: "Aptos",
-    lang: "en-US",
   };
 
   slides.forEach((deckSlide, index) => {
@@ -172,9 +170,9 @@ async function buildPresentation(slides: DeckSlide[]): Promise<Buffer> {
       fontSize: 16,
       color: "292524",
       fit: "shrink",
-      valign: "mid",
-      bullet: { type: "ul" },
-      paraSpaceAfterPt: 10,
+      valign: "middle",
+      bullet: { type: "bullet" },
+      paraSpaceAfter: 10,
     });
 
     slide.addShape(pptx.ShapeType.rect, {
