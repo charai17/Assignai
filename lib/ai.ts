@@ -334,13 +334,23 @@ Rules:
 
   if (!humanizedSections.ok) return assignmentStageError("section humanizing", humanizedSections, requestId, config.ai.provider);
 
-  let finalDraft = humanizedSections.text;
-  let wordReport = buildWordCountReport(finalDraft, targetWords);
-
   const citationStyle = chooseCitationStyle(payload, structuredAnalysis, input);
+  const citationPass = await referenceDraftClaims({
+    draft: humanizedSections.text,
+    assignmentContext: `${input}\n\n${approvedAnalysis}\n\n${evidencePlan.text}`,
+    citationStyle,
+    requestId,
+    logLabel: "assignai assignment reference pass failed",
+  });
+
+  let finalDraft = citationPass.citedDraft;
+  let wordReport = buildWordCountReport(finalDraft, targetWords);
   const references = formatCitationSections({
-    references: [],
-    sourcesNeeded: extractReferenceCandidates(`${verifiedSectionDraft}\n\n${finalDraft}`),
+    references: citationPass.references,
+    sourcesNeeded: sortReferencesAlphabetically([
+      ...citationPass.sourcesNeeded,
+      ...extractReferenceCandidates(`${verifiedSectionDraft}\n\n${finalDraft}`).filter((reference) => /^\[Add (source|full reference for):/i.test(reference)),
+    ]),
     citationStyle,
   });
   const wordCountSection = formatWordCountReport(wordReport, false);
@@ -368,18 +378,54 @@ ${wordCountSection}`,
           "section-word-count-check",
           sectionVerification.adjustedCount > 0 ? "section-rewrite-loop" : "section-check-pass",
           "humanize-sections",
+          "reference-adder-pass",
           "final-word-count-check",
-          "source-placeholder-sort",
+          "reference-sort",
         ],
         wordCount: wordReport,
         sectionWordCounts: humanizedSections.reports,
         citations: {
           style: citationStyle,
-          action: "deferred-to-reference-adder",
+          citedClaims: citationPass.citedClaims,
+          placeholderClaims: citationPass.placeholderClaims,
         },
       },
     },
   };
+}
+
+async function referenceDraftClaims({
+  draft,
+  assignmentContext,
+  citationStyle,
+  requestId,
+  logLabel,
+}: {
+  draft: string;
+  assignmentContext: string;
+  citationStyle: string;
+  requestId: string;
+  logLabel: string;
+}) {
+  return citeDraftClaims({
+    draft,
+    assignmentContext,
+    citationStyle,
+    requestId,
+  }).catch((error) => {
+    console.error(logLabel, {
+      requestId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    return {
+      citedDraft: draft,
+      references: [],
+      sourcesNeeded: extractReferenceCandidates(draft),
+      citedClaims: 0,
+      placeholderClaims: 0,
+    };
+  });
 }
 
 async function generateReferencePipeline({
@@ -396,24 +442,12 @@ async function generateReferencePipeline({
     stringValue(payload.context, ""),
   ].filter(Boolean).join("\n\n") || input;
 
-  const citationPass = await citeDraftClaims({
+  const citationPass = await referenceDraftClaims({
     draft: input,
     assignmentContext,
     citationStyle,
     requestId,
-  }).catch((error) => {
-    console.error("assignai reference adder failed", {
-      requestId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-
-    return {
-      citedDraft: input,
-      references: [],
-      sourcesNeeded: extractReferenceCandidates(input),
-      citedClaims: 0,
-      placeholderClaims: 0,
-    };
+    logLabel: "assignai reference adder failed",
   });
 
   const references = formatCitationSections({
