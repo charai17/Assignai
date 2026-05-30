@@ -319,75 +319,6 @@ Rules:
   });
   let verifiedSectionDraft = sectionVerification.draft;
 
-  const qualityReview = await callAiChat({
-    config,
-    requestId,
-    stage: "quality-critic",
-    temperature: 0.1,
-    system: assignmentPipelineSystem("quality critic"),
-    prompt: `${sharedContext}
-
-Approved structured brief analysis:
-${approvedAnalysis}
-
-Evidence plan:
-${evidencePlan.text}
-
-Draft to review:
-${verifiedSectionDraft}
-
-Stage 5: Critically review the draft before humanizing.
-
-Return only one of these:
-PASS
-or
-ISSUES:
-- issue
-- issue
-
-Check:
-- The draft answers the actual brief and rubric.
-- All planned real sections are present.
-- Administrative criteria are not used as standalone sections.
-- Claims that need evidence have inline citations or source placeholders where the claim is made.
-- The draft does not invent project facts, organisations, software names, statistics, authors, dates, URLs, DOI values, or page numbers.
-- The draft is not generic when the brief supplied specific details.`,
-  });
-
-  if (qualityReview.ok && /^ISSUES:/i.test(qualityReview.text.trim())) {
-    const repairedDraft = await callAiChat({
-      config,
-      requestId,
-      stage: "quality-rewrite",
-      temperature: 0.25,
-      system: assignmentPipelineSystem("quality rewrite"),
-      prompt: `${sharedContext}
-
-Approved structured brief analysis:
-${approvedAnalysis}
-
-Evidence plan:
-${evidencePlan.text}
-
-Quality issues to fix:
-${qualityReview.text}
-
-Draft to repair:
-${verifiedSectionDraft}
-
-Rewrite the draft to fix only the listed quality issues.
-
-Rules:
-- Preserve all planned section headings.
-- Keep all citation placeholders inline where evidence is needed.
-- Do not invent facts, sources, references, data, URLs, DOI values, page numbers, organisations, software names, dates, or outcomes.
-- Do not add planning notes, quality checks, or reference lists.
-- Return only the repaired assignment/report draft.`,
-    });
-
-    if (repairedDraft.ok && repairedDraft.text) verifiedSectionDraft = repairedDraft.text;
-  }
-
   const citationStyle = chooseCitationStyle(payload, structuredAnalysis, input);
   const citationPass = await citeDraftClaims({
     draft: verifiedSectionDraft,
@@ -456,10 +387,8 @@ ${wordCountSection}`,
           completedSectionDraft.addedCount > 0 ? "missing-section-fill" : "section-completeness-check",
           "section-word-count-check",
           sectionVerification.adjustedCount > 0 ? "section-rewrite-loop" : "section-check-pass",
-          qualityReview.ok && /^ISSUES:/i.test(qualityReview.text.trim()) ? "quality-rewrite" : "quality-pass",
           "claim-level-citation-pass",
           "humanize-sections",
-          humanizedSections.adjustedCount > 0 ? "humanize-section-fallback" : "humanize-section-pass",
           "final-word-count-check",
           "reference-sort",
         ],
@@ -710,7 +639,6 @@ async function humanizeSectionsIndividually({
   const targets = alignSectionTargets(sections, sectionTargets);
   const humanized: DraftSection[] = [];
   const reports: SectionWordReport[] = [];
-  let fallbackCount = 0;
 
   for (let index = 0; index < sections.length; index += 1) {
     const section = sections[index];
@@ -749,28 +677,10 @@ Section to humanize:
 ${section.content}`,
     });
 
-    if (!response.ok) return { ...response, reports, adjustedCount: fallbackCount };
+    if (!response.ok) return { ...response, reports, adjustedCount: 0 };
     const normalized = normalizeRewrittenSection(response.text, target.title);
-    const humanizedReport = buildWordCountReport(stripReferenceBlocks(normalized.content), target.target);
-
-    if (humanizedReport.withinRange) {
-      humanized.push(normalized);
-      reports.push({ title: target.title, ...humanizedReport, attempts: 0, adjusted: false });
-      continue;
-    }
-
-    fallbackCount += 1;
-    console.warn("assignai humanized section rejected for word count", {
-      requestId,
-      title: target.title,
-      target: humanizedReport.target,
-      lower: humanizedReport.lower,
-      upper: humanizedReport.upper,
-      actual: humanizedReport.actual,
-    });
-    const originalReport = buildWordCountReport(stripReferenceBlocks(section.content), target.target);
-    humanized.push(section);
-    reports.push({ title: target.title, ...originalReport, attempts: 0, adjusted: false });
+    humanized.push(normalized);
+    reports.push({ title: target.title, ...buildWordCountReport(stripReferenceBlocks(normalized.content), target.target), attempts: 0, adjusted: false });
   }
 
   return {
@@ -778,7 +688,7 @@ ${section.content}`,
     status: 200,
     text: orderSectionsByPlan(humanized, sectionTargets).map((section) => section.content.trim()).join("\n\n"),
     reports,
-    adjustedCount: fallbackCount,
+    adjustedCount: 0,
   };
 }
 
