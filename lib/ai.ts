@@ -624,96 +624,33 @@ function mockResult(kind: ToolKind, input: string, payload: Record<string, unkno
   if (kind === "assignment") {
     const target = getTargetWordCount(payload, input);
     const citation = stringValue(payload.citationStyle, "Not specified");
-    const introTarget = Math.round(target * 0.1);
-    const firstTarget = Math.round(target * 0.25);
-    const secondTarget = Math.round(target * 0.25);
-    const evaluationTarget = Math.round(target * 0.25);
-    const conclusionTarget = target - introTarget - firstTarget - secondTarget - evaluationTarget;
-    const draft = `## Introduction
-This assignment addresses ${shortTitle(input)}. It should define the central issue, explain why the topic matters, and establish a clear thesis. [Add source: author/year for background evidence]
+    const finalDraft = `# Assignment Draft
 
-References used in this section
-- [Add source: author/year for background evidence]
+## Introduction
 
-## Main Section 1
-The first section should develop the strongest supporting point. Begin with a topic sentence, add evidence from a real source, and explain how that evidence supports the argument. [Add source: author/year for first main claim]
+This draft is based on the supplied brief: ${shortTitle(input)}. It should introduce the task, define the project or topic using only confirmed details from the brief, and state the main argument or purpose of the assignment. Where evidence is needed, replace placeholders with verified academic or practitioner sources before use [Add source: author/year for assignment context].
 
-References used in this section
-- [Add source: author/year for first main claim]
+## Main Discussion
 
-## Main Section 2
-The second section should build on the argument with another major point. Use evidence carefully and avoid making claims that are not supported by sources. [Add source: author/year for second main claim]
+The main body should follow the content criteria in the brief rather than administrative marking criteria. It should apply relevant concepts, explain how they relate to the project or question, and avoid adding unsupported project facts, organisations, software names, outcomes, statistics, or sources. If the brief requires a critical appraisal, the appraisal should evaluate the selected documents in context, showing strengths, limitations, and how each document supports project delivery [Add source: author/year for relevant theory].
 
-References used in this section
-- [Add source: author/year for second main claim]
+## Reflection or Evaluation
 
-## Counterpoint or Evaluation
-A stronger assignment should acknowledge complexity. This section can discuss a limitation, alternative interpretation, or counterargument, then explain how it affects the overall thesis. [Add source: author/year for counterpoint]
-
-References used in this section
-- [Add source: author/year for counterpoint]
+Where reflection is required, it should connect personal or team learning to project management practice. It should be specific enough to be useful, but it should not invent team events that were not supplied by the user. Add real experience notes before using this section [Add source: author/year for reflective practice if required].
 
 ## Conclusion
-The conclusion should synthesize the argument rather than repeat each paragraph. It should return to the thesis, summarize the strongest insight, and close with the wider implication.`;
-    const finalDraft = `This assignment explores ${shortTitle(input)} through a clear argument built from the brief, evidence, and marking criteria. The introduction should set up the issue in plain academic language, define key terms, and lead into a focused thesis. Each body section should then develop one idea at a time, using real evidence where the placeholders appear. The final version should sound natural and confident while staying precise, properly cited, and easy to check against the rubric.`;
+
+The conclusion should synthesize the main points and return to the assignment task. It should not introduce new evidence. Before submission, the user should replace placeholders, check facts, and edit the wording so it reflects their own work.`;
     const wordReport = buildWordCountReport(finalDraft, target);
-    const sectionReports = [
-      { title: "Introduction", ...buildWordCountReport("This assignment addresses the topic and sets up the thesis.", introTarget), attempts: 0, adjusted: false },
-      { title: "Main Section 1", ...buildWordCountReport("This section develops the first argument with evidence and explanation.", firstTarget), attempts: 0, adjusted: false },
-      { title: "Main Section 2", ...buildWordCountReport("This section develops the second argument with evidence and explanation.", secondTarget), attempts: 0, adjusted: false },
-      { title: "Counterpoint or Evaluation", ...buildWordCountReport("This section evaluates complexity and addresses a limitation or counterpoint.", evaluationTarget), attempts: 0, adjusted: false },
-      { title: "Conclusion", ...buildWordCountReport("This section synthesizes the argument and closes the assignment.", conclusionTarget), attempts: 0, adjusted: false },
-    ];
 
     return {
       ok: true,
-      result: `# Brief Analysis
-- What the assignment is about: ${shortTitle(input)}
-- Task type: essay or structured academic response, based on the current brief.
-- Inferred or selected word count: ${target} words.
-- Inferred or selected citation style: ${citation}.
-- Academic context: infer level and subject from the brief.
-- Marker focus: answer the question directly, use relevant evidence, structure the response clearly, and cite accurately.
-- Missing information: add rubric details and real source notes for a stronger result.
+      result: `${formatQualityNotice(wordReport, [])}${finalDraft}
 
-# Section Plan With Word Counts
-- Introduction: ${introTarget} words. Define the topic, give context, and present the thesis.
-- Main Section 1: ${firstTarget} words. Develop the first major argument with evidence.
-- Main Section 2: ${secondTarget} words. Develop the second major argument with evidence.
-- Counterpoint or Evaluation: ${evaluationTarget} words. Show critical thinking and evaluate limitations.
-- Conclusion: ${conclusionTarget} words. Synthesize the argument and close clearly.
+${formatAlphabetizedReferences(extractReferenceCandidates(finalDraft), citation)}
 
-# Writing Plan
-1. Analyze the brief and rubric.
-2. Draft each section using the section word count targets.
-3. Fill any missing planned section before checking word counts.
-4. Check every section with code before humanizing.
-5. Rewrite any section that is outside its 10% range.
-6. Humanize the verified draft while preserving citations and placeholders.
-7. Sort the extracted references alphabetically.
-8. Run the code-based final word count check.
-
-# Section-by-Section Draft
-${draft}
-
-# Section Word Count Checks
-${formatSectionWordCountReport(sectionReports)}
-
-# Humanized Final Draft
-${finalDraft}
-
-${formatAlphabetizedReferences(extractReferenceCandidates(draft), citation)}
-
-${formatWordCountReport(wordReport, false)}
-
-# Final Checks Before Submission
-- Replace every citation placeholder with a real source.
-- Check the final structure against the rubric.
-- Verify all facts, dates, names, and definitions.
-- Make sure each paragraph answers the assignment question.
-- Format citations and references in the required style.
-- Edit the final wording so it reflects your own understanding.`,
-      raw: { mock: true, kind, requestId, wordCount: wordReport, sectionWordCounts: sectionReports },
+${formatWordCountReport(wordReport, false)}`,
+      raw: { mock: true, kind, requestId, wordCount: wordReport, sectionWordCounts: [] },
     };
   }
 
