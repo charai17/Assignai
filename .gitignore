@@ -4,6 +4,11 @@ out
 dist
 .env*.local
 .vercel
+.vercel-cache
+.vercel-data
+.npm-cache
+.vercel-login*.out
+.vercel-login*.err
 *.log
 *.tsbuildinfo
 .DS_Store
