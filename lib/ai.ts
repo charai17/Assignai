@@ -410,41 +410,22 @@ Rules:
   });
   verifiedSectionDraft = citationPass.citedDraft;
 
-  const humanizedDraft = await callAiChat({
+  const humanizedSections = await humanizeSectionsIndividually({
     config,
     requestId,
-    stage: "humanize-draft",
-    temperature: 0.45,
-    system: assignmentPipelineSystem("humanize"),
-    prompt: `${sharedContext}
-
-Stage 6: Humanize and polish the verified section draft into one coherent final draft.
-
-Target word count: ${targetWords}
-Accepted code-counted range for the full draft: ${lower} to ${upper} words
-
-Important:
-- The section draft below has already been checked section by section with code.
-- Preserve the section headings, section balance, citations, and source placeholders.
-- Preserve inline citations and placeholders exactly where the supported claim appears.
-- Do not remove, rewrite, relocate, or add inline citations.
-- Do not allow humanizing to make any section much longer or shorter.
-- Remove any accidental "References used in this section" blocks.
-- Return a clean assignment/report draft only.
-
-Verified section draft:
-${verifiedSectionDraft}
-
-Return only the polished final draft. Keep all citation placeholders and real source mentions intact. Do not include a reference list here, notes, checks, or planning material.`,
+    sharedContext,
+    analysis: approvedAnalysis,
+    sectionDraft: verifiedSectionDraft,
+    sectionTargets,
   });
 
-  if (!humanizedDraft.ok) return assignmentStageError("humanizing", humanizedDraft, requestId, config.ai.provider);
+  if (!humanizedSections.ok) return assignmentStageError("section humanizing", humanizedSections, requestId, config.ai.provider);
 
-  let finalDraft = humanizedDraft.text;
+  let finalDraft = humanizedSections.text;
   let wordReport = buildWordCountReport(finalDraft, targetWords);
   let adjusted = false;
 
-  for (let adjustmentAttempt = 1; !wordReport.withinRange && adjustmentAttempt <= 2; adjustmentAttempt += 1) {
+  for (let adjustmentAttempt = 1; !wordReport.withinRange && adjustmentAttempt <= 4; adjustmentAttempt += 1) {
     const adjustmentMode = wordReport.actual < wordReport.lower ? "expand" : "tighten";
     const adjustment = await callAiChat({
       config,
@@ -459,7 +440,7 @@ Stage 7: ${adjustmentMode === "expand" ? "Expand" : "Tighten"} this final draft 
 Current code-counted words: ${wordReport.actual}
 Target words: ${targetWords}
 Accepted range: ${lower} to ${upper}
-Adjustment attempt: ${adjustmentAttempt} of 2
+Adjustment attempt: ${adjustmentAttempt} of 4
 
 Approved section plan and targets:
 ${approvedAnalysis}
@@ -496,7 +477,7 @@ ${finalDraft}`,
     citationStyle,
   });
   const wordCountSection = formatWordCountReport(wordReport, adjusted);
-  const qualityNotice = formatQualityNotice(wordReport, sectionVerification.reports);
+  const qualityNotice = formatQualityNotice(wordReport, humanizedSections.reports);
 
   return {
     status: 200,
@@ -521,12 +502,13 @@ ${wordCountSection}`,
           sectionVerification.adjustedCount > 0 ? "section-rewrite-loop" : "section-check-pass",
           qualityReview.ok && /^ISSUES:/i.test(qualityReview.text.trim()) ? "quality-rewrite" : "quality-pass",
           "claim-level-citation-pass",
-          "humanize-draft",
+          "humanize-sections",
+          humanizedSections.adjustedCount > 0 ? "post-humanize-section-rewrite-loop" : "post-humanize-section-check-pass",
           adjusted ? "final-word-count-adjustment" : "final-word-count-check",
           "reference-sort",
         ],
         wordCount: wordReport,
-        sectionWordCounts: sectionVerification.reports,
+        sectionWordCounts: humanizedSections.reports,
         citations: {
           style: citationStyle,
           citedClaims: citationPass.citedClaims,
@@ -662,10 +644,18 @@ Previously written sections for continuity. Do not repeat this content:
 ${previousSections || "None. This is the first section."}
 
 Rules:
+- You write one section at a time. Do not skip ahead.
+- Do not summarise the rest of the assignment.
+- Do not write any section you have not been explicitly instructed to write.
 - Return only this section.
 - Start with the exact markdown heading: ## ${target.title}
 - Write developed academic paragraphs, not notes or bullets.
-- Aim for the target word count now. Do not rely on later stages to expand the section.
+- Hit the target word count as closely as possible. Aim within 2% now, and never outside the accepted 10% range.
+- Do not rely on later stages to expand the section.
+- Do not pad with filler, vague statements, or repetition to hit the count.
+- Every sentence must earn its place.
+- Begin with a clear topic sentence or framing statement.
+- End with a closing sentence that consolidates the point or transitions naturally to the next planned section.
 - Use only details the user supplied. Do not invent the organisation, industry, staff roles, software names, books, journal articles, URLs, DOI values, page numbers, quotes, statistics, or named authors.
 - Every claim that needs support must have an inline citation or an inline placeholder where the claim is made.
 - If information is missing, continue writing with clear inline placeholders instead of skipping the section.
@@ -739,6 +729,91 @@ async function verifySectionWordCounts({
 
   return {
     draft: verified.map((section) => section.content.trim()).join("\n\n"),
+    reports,
+    adjustedCount,
+  };
+}
+
+async function humanizeSectionsIndividually({
+  config,
+  requestId,
+  sharedContext,
+  analysis,
+  sectionDraft,
+  sectionTargets,
+}: {
+  config: ReturnType<typeof getConfig>;
+  requestId: string;
+  sharedContext: string;
+  analysis: string;
+  sectionDraft: string;
+  sectionTargets: SectionTarget[];
+}): Promise<ChatCallResult & { reports: SectionWordReport[]; adjustedCount: number }> {
+  const sourceSections = splitDraftSections(sectionDraft);
+  const sections = sourceSections.length ? sourceSections : [{ title: "Assignment Draft", content: sectionDraft }];
+  const targets = alignSectionTargets(sections, sectionTargets);
+  const humanized: DraftSection[] = [];
+  const reports: SectionWordReport[] = [];
+  let adjustedCount = 0;
+
+  for (let index = 0; index < sections.length; index += 1) {
+    const section = sections[index];
+    const fallbackTarget = Math.max(50, Math.round((getTotalTarget(sectionTargets) || 1000) / sections.length));
+    const target = targets[index] || { title: section.title, target: fallbackTarget };
+    const response = await callAiChat({
+      config,
+      requestId,
+      stage: `humanize-section-${index + 1}`,
+      temperature: 0.4,
+      system: assignmentPipelineSystem("humanize one section"),
+      prompt: `${sharedContext}
+
+Humanize the following assignment section only.
+
+Approved analysis and section plan:
+${analysis}
+
+Section title: ${target.title}
+Target word count for this section: ${target.target}
+Accepted range for this section: ${Math.ceil(target.target * 0.9)} to ${Math.floor(target.target * 1.1)} words
+Section number: ${index + 1} of ${sections.length}
+${formatSectionTargetDetails(target)}
+
+Rules:
+- Return only this one section.
+- Preserve the markdown heading.
+- Preserve every inline citation and source placeholder exactly where the supported claim appears.
+- Do not remove, rewrite, relocate, or add inline citations.
+- Do not summarise, shorten, or compress the section.
+- Keep the section within its accepted word-count range.
+- Keep formal academic register.
+- Do not add a reference list, planning notes, word-count notes, or commentary.
+
+Section to humanize:
+${section.content}`,
+    });
+
+    if (!response.ok) return { ...response, reports, adjustedCount };
+    const normalized = normalizeRewrittenSection(response.text, target.title);
+    const checked = await rewriteSectionToWordTarget({
+      config,
+      requestId,
+      sharedContext,
+      analysis,
+      section: normalized,
+      target,
+      stagePrefix: `post-humanize-section-word-count-${index + 1}`,
+    });
+
+    if (checked.report.adjusted) adjustedCount += 1;
+    humanized.push(checked.section);
+    reports.push(checked.report);
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    text: orderSectionsByPlan(humanized, sectionTargets).map((section) => section.content.trim()).join("\n\n"),
     reports,
     adjustedCount,
   };
@@ -905,7 +980,7 @@ async function rewriteSectionToWordTarget({
   let attempts = 0;
   let adjusted = false;
 
-  while (!report.withinRange && attempts < 2) {
+  while (!report.withinRange && attempts < 4) {
     attempts += 1;
     const rewrite = await callAiChat({
       config,
@@ -924,7 +999,7 @@ Section title: ${target.title}
 Target for this section: ${target.target} words
 Accepted range for this section: ${report.lower} to ${report.upper} words
 Current code-counted section words: ${report.actual}
-Rewrite attempt: ${attempts} of 2
+Rewrite attempt: ${attempts} of 4
 ${formatSectionTargetDetails(target)}
 
 Rules:
@@ -932,6 +1007,7 @@ Rules:
 - Preserve the section heading.
 - Preserve the argument, citations, and source placeholders.
 - If it is too short, add useful analysis tied to the brief and rubric.
+- If it is too short, expand the section substantially enough to enter the accepted range, not by a few sentences.
 - If it is too long, tighten wording without removing required evidence.
 - Keep the section as developed paragraphs, not bullet notes.
 - Do not add unrelated sections.
