@@ -433,26 +433,32 @@ Return only the polished final draft. Keep all citation placeholders and real so
   let wordReport = buildWordCountReport(finalDraft, targetWords);
   let adjusted = false;
 
-  if (!wordReport.withinRange) {
+  for (let adjustmentAttempt = 1; !wordReport.withinRange && adjustmentAttempt <= 2; adjustmentAttempt += 1) {
+    const adjustmentMode = wordReport.actual < wordReport.lower ? "expand" : "tighten";
     const adjustment = await callAiChat({
       config,
       requestId,
-      stage: "final-word-count-adjustment",
+      stage: `final-word-count-adjustment-${adjustmentAttempt}`,
       temperature: 0.25,
       system: assignmentPipelineSystem("final adjustment"),
       prompt: `${sharedContext}
 
-Stage 5: Adjust this final draft so the code-counted total word count lands between ${lower} and ${upper} words.
+Stage 7: ${adjustmentMode === "expand" ? "Expand" : "Tighten"} this final draft so the code-counted total word count lands between ${lower} and ${upper} words.
 
 Current code-counted words: ${wordReport.actual}
 Target words: ${targetWords}
 Accepted range: ${lower} to ${upper}
+Adjustment attempt: ${adjustmentAttempt} of 2
+
+Approved section plan and targets:
+${approvedAnalysis}
 
 Rules:
 - Preserve the argument, section headings, citations, and source placeholders.
 - Keep inline citations and placeholders attached to the claims they support.
 - Keep section proportions close to the verified section draft.
-- If the draft is too short, add useful analysis instead of filler.
+- If the draft is too short, expand every underdeveloped section with useful analysis, explanation, evaluation, and application to the brief.
+- If a section currently contains a note saying it was not included or should be developed, replace that note with the full section.
 - If the draft is too long, tighten wording without deleting key evidence.
 - Do not add a reference list.
 - Do not add notes, checks, planning material, or "References used in this section" blocks.
@@ -531,7 +537,9 @@ async function completeMissingDraftSections({
 
   for (let index = 0; index < sectionTargets.length; index += 1) {
     const target = sectionTargets[index];
-    const alreadyDrafted = completedSections.some((section) => titleMatches(normalizeTitle(section.title), normalizeTitle(target.title)));
+    const alreadyDrafted = completedSections.some((section) => (
+      titleMatches(normalizeTitle(section.title), normalizeTitle(target.title)) && !isPlaceholderSection(section.content)
+    ));
     if (alreadyDrafted) continue;
 
     const generated = await callAiChat({
@@ -565,7 +573,14 @@ Rules:
     });
 
     if (generated.ok && generated.text) {
-      completedSections.push(normalizeRewrittenSection(generated.text, target.title));
+      const replacement = normalizeRewrittenSection(generated.text, target.title);
+      const placeholderIndex = completedSections.findIndex((section) => (
+        titleMatches(normalizeTitle(section.title), normalizeTitle(target.title)) && isPlaceholderSection(section.content)
+      ));
+
+      if (placeholderIndex >= 0) completedSections[placeholderIndex] = replacement;
+      else completedSections.push(replacement);
+
       addedCount += 1;
     }
   }
@@ -1140,6 +1155,12 @@ function normalizeRewrittenSection(text: string, expectedTitle: string): DraftSe
   return { title: expectedTitle, content: `## ${expectedTitle}\n${trimmed}` };
 }
 
+function isPlaceholderSection(content: string): boolean {
+  const normalized = content.toLowerCase();
+  return /not included|not provided|should be developed|to be developed|placeholder section|section was omitted|missing from the draft|user.?s draft/i.test(normalized)
+    || normalized.replace(/^#{1,4}\s+.+$/gm, "").trim().length < 120;
+}
+
 function titleMatches(a: string, b: string): boolean {
   return a === b || a.includes(b) || b.includes(a);
 }
@@ -1364,7 +1385,7 @@ function formatAlphabetizedReferences(references: string[], citationStyle: strin
   const sourcePlaceholders = sorted.filter((reference) => /^\[Add (source|full reference for):/i.test(reference));
   const referenceBody = realReferences.length
     ? realReferences.map((reference) => `- ${reference}`).join("\n")
-    : "- Add full reference details for every inline citation before submission.";
+    : "- No verified reference details were supplied. Add real sources for the inline placeholders before submission.";
   const sourcesNeeded = sourcePlaceholders.length
     ? `\n\n# Sources Needed\n${sourcePlaceholders.map((reference) => `- ${reference}`).join("\n")}`
     : "";
