@@ -294,7 +294,8 @@ export default function HomePage() {
           await saveHistory(generated, true);
           return;
         } catch (jobError) {
-          setSyncStatus("Tracked jobs are not ready yet. Using direct generation for this request.");
+          const message = jobError instanceof Error ? jobError.message : "Tracked assignment job failed.";
+          throw new Error(`Tracked assignment job failed: ${message}`);
         }
       }
 
@@ -315,15 +316,10 @@ export default function HomePage() {
       body: JSON.stringify(payloadForMode(currentMode)),
     });
 
-    let data: ApiResponse = {};
-    try {
-      data = (await response.json()) as ApiResponse;
-    } catch {
-      // Non-JSON responses are handled by the status/output checks below.
-    }
+    const data = await readApiResponse(response);
 
     if (!response.ok || data.ok === false) {
-      throw new Error(data.result || data.error || data.message || "The request failed. Please try again.");
+      throw new Error(data.result || data.error || data.message || `The request failed with HTTP ${response.status}. Please try again.`);
     }
 
     const generated = data.output || data.result || data.text || "";
@@ -339,9 +335,9 @@ export default function HomePage() {
       body: JSON.stringify({ ...payloadForMode("assignment"), kind: "assignment" }),
     });
 
-    const created = (await createResponse.json()) as ApiResponse;
+    const created = await readApiResponse(createResponse);
     if (!createResponse.ok || created.ok === false || !created.raw?.job?.id) {
-      throw new Error(created.result || created.error || created.message || "Could not create the assignment job.");
+      throw new Error(created.result || created.error || created.message || `Could not create the assignment job. HTTP ${createResponse.status}.`);
     }
 
     setSyncStatus("Assignment job queued. Writing now...");
@@ -351,9 +347,9 @@ export default function HomePage() {
       headers: await apiHeaders(),
     });
 
-    const run = (await runResponse.json()) as ApiResponse;
+    const run = await readApiResponse(runResponse);
     if (!runResponse.ok || run.ok === false) {
-      throw new Error(run.result || run.error || run.message || "The assignment job failed.");
+      throw new Error(run.result || run.error || run.message || `The assignment job failed. HTTP ${runResponse.status}.`);
     }
 
     const generated = run.output || run.result || run.text || run.raw?.job?.output || "";
@@ -599,6 +595,22 @@ export default function HomePage() {
     if (currentMode === "assignment") return "/api/assignment";
     if (currentMode === "humanizer") return "/api/humanize";
     return "/api/powerpoint";
+  }
+
+  async function readApiResponse(response: Response): Promise<ApiResponse> {
+    const text = await response.text();
+    if (!text) {
+      return { ok: false, result: `The server returned an empty response. HTTP ${response.status}.` };
+    }
+
+    try {
+      return JSON.parse(text) as ApiResponse;
+    } catch {
+      return {
+        ok: false,
+        result: `The server returned a non-JSON response. HTTP ${response.status}. ${text.slice(0, 240)}`,
+      };
+    }
   }
 
   async function apiHeaders(): Promise<HeadersInit> {

@@ -220,7 +220,7 @@ Rules:
     };
   }
 
-  const analysis = await callAiChat({
+  const analysis = structuredAnalysis ? null : await callAiChat({
     config,
     requestId,
     stage: "analysis",
@@ -254,11 +254,11 @@ Planning rules:
 List the writing order and what each stage must achieve.`,
   });
 
-  if (!analysis.ok) return assignmentStageError("analysis", analysis, requestId, config.ai.provider);
-  const approvedAnalysis = structuredAnalysis ? formatStructuredAnalysis(structuredAnalysis, targetWords) : analysis.text;
+  if (analysis && !analysis.ok) return assignmentStageError("analysis", analysis, requestId, config.ai.provider);
+  const approvedAnalysis = structuredAnalysis ? formatStructuredAnalysis(structuredAnalysis, targetWords) : analysis?.text || "";
   const sectionTargets = structuredAnalysis?.sections?.length
     ? sectionTargetsFromStructuredAnalysis(structuredAnalysis, targetWords)
-    : extractSectionTargets(analysis.text, targetWords);
+    : extractSectionTargets(analysis?.text || "", targetWords);
 
   const evidencePlan = await callAiChat({
     config,
