@@ -394,6 +394,19 @@ Rules:
     assignmentContext: `${input}\n${approvedAnalysis}\n${evidencePlan.text}`,
     citationStyle,
     requestId,
+  }).catch((error) => {
+    console.error("assignai citation pass failed", {
+      requestId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    return {
+      citedDraft: verifiedSectionDraft,
+      references: [],
+      sourcesNeeded: extractReferenceCandidates(verifiedSectionDraft),
+      citedClaims: 0,
+      placeholderClaims: 0,
+    };
   });
   verifiedSectionDraft = citationPass.citedDraft;
 
@@ -734,6 +747,9 @@ async function verifySectionWordCounts({
 async function callAiChat({ config, requestId, system, prompt, temperature, stage }: ChatCall): Promise<ChatCallResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.ai.timeoutMs);
+  const startedAt = Date.now();
+  const stageName = stage || "chat";
+  console.info("assignai ai stage start", { requestId, stage: stageName, model: activeModel(config) });
 
   try {
     const requestConfig = aiRequestConfig(config, requestId);
@@ -753,6 +769,15 @@ async function callAiChat({ config, requestId, system, prompt, temperature, stag
 
     const raw = (await response.json().catch(() => ({}))) as ChatResponse;
     const text = normalizeChatText(raw);
+    const durationMs = Date.now() - startedAt;
+    console.info("assignai ai stage end", {
+      requestId,
+      stage: stageName,
+      status: response.status,
+      ok: response.ok,
+      durationMs,
+      outputChars: text.length,
+    });
 
     if (!response.ok) {
       return {
@@ -766,6 +791,12 @@ async function callAiChat({ config, requestId, system, prompt, temperature, stag
 
     return { ok: true, status: response.status, text, raw };
   } catch (error) {
+    console.error("assignai ai stage error", {
+      requestId,
+      stage: stageName,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+    });
     const message = error instanceof Error && error.name === "AbortError"
       ? `AI request timed out${stage ? ` during ${stage}` : ""}. Please try again.`
       : error instanceof Error && error.message

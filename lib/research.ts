@@ -29,7 +29,8 @@ type OpenAlexWork = {
   authorships?: Array<{ author?: { display_name?: string } }>;
 };
 
-const MAX_CLAIMS_TO_RESEARCH = 36;
+const MAX_CLAIMS_TO_RESEARCH = 8;
+const SOURCE_LOOKUP_TIMEOUT_MS = 3_500;
 const MIN_CLAIM_WORDS = 7;
 
 export async function citeDraftClaims({
@@ -158,21 +159,28 @@ async function findSourceForClaim(claim: string, assignmentContext: string, requ
   url.searchParams.set("search", query);
   url.searchParams.set("per-page", "5");
   url.searchParams.set("sort", "relevance_score:desc");
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SOURCE_LOOKUP_TIMEOUT_MS);
 
-  const response = await fetch(url, {
-    headers: {
-      "user-agent": "AssignAI/0.1 research citation pass",
-      "x-request-id": requestId,
-    },
-  }).catch(() => null);
+  try {
+    const response = await fetch(url, {
+      headers: {
+        "user-agent": "AssignAI/0.1 research citation pass",
+        "x-request-id": requestId,
+      },
+      signal: controller.signal,
+    }).catch(() => null);
 
-  if (!response?.ok) return null;
-  const data = await response.json().catch(() => null) as { results?: OpenAlexWork[] } | null;
-  const works = data?.results || [];
-  const source = works.map(openAlexToSource).find(Boolean) || null;
-  if (!source) return null;
+    if (!response?.ok) return null;
+    const data = await response.json().catch(() => null) as { results?: OpenAlexWork[] } | null;
+    const works = data?.results || [];
+    const source = works.map(openAlexToSource).find(Boolean) || null;
+    if (!source) return null;
 
-  return source;
+    return source;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function openAlexToSource(work: OpenAlexWork): ResearchSource | null {
