@@ -60,6 +60,7 @@ const HISTORY_KEY = "assignai-history";
 const wordCounts = ["Auto-detect", "500", "750", "1000", "1500", "2000", "3000", "4000", "5000"];
 const draftTypes = ["Full staged draft", "Detailed plan only", "Improve my draft", "Section plan + draft"];
 const citationStyles = ["Auto-detect", "Harvard", "APA 7", "MLA", "Chicago", "IEEE", "OSCOLA"];
+const missingInfoModes = ["Ask me first", "Continue with placeholders"];
 const humanizerTones = ["Natural", "Conversational", "Professional", "Friendly", "Confident"];
 const slideCounts = ["4", "5", "6", "8", "10", "12"];
 const deckStyles = ["Academic briefing", "Seminar talk", "Research pitch", "Case study", "Client-ready"];
@@ -101,6 +102,7 @@ export default function HomePage() {
   const [draftType, setDraftType] = useState(draftTypes[0]);
   const [citationStyle, setCitationStyle] = useState(citationStyles[0]);
   const [wordCount, setWordCount] = useState(wordCounts[0]);
+  const [missingInfoMode, setMissingInfoMode] = useState(missingInfoModes[0]);
   const [humanizerText, setHumanizerText] = useState("");
   const [humanizerTone, setHumanizerTone] = useState(humanizerTones[0]);
   const [powerpointPrompt, setPowerpointPrompt] = useState("");
@@ -180,6 +182,7 @@ export default function HomePage() {
         citationStyle={citationStyle}
         draftType={draftType}
         landingError={landingError}
+        missingInfoMode={missingInfoMode}
         pdfUploading={pdfUploading}
         pdfUploadStatus={pdfUploadStatus}
         rubric={rubric}
@@ -188,6 +191,7 @@ export default function HomePage() {
         onCitationStyleChange={setCitationStyle}
         onDraftTypeChange={setDraftType}
         onGenerate={handlePreSignupGenerate}
+        onMissingInfoModeChange={setMissingInfoMode}
         onPdfUpload={handlePdfUpload}
         onPromptChange={setAssignmentPrompt}
         onRubricChange={setRubric}
@@ -616,6 +620,7 @@ export default function HomePage() {
         draftType,
         citationStyle,
         wordCount,
+        missingInfoMode,
       };
     }
 
@@ -697,6 +702,7 @@ export default function HomePage() {
               humanizerText={humanizerText}
               humanizerTone={humanizerTone}
               loading={loading}
+              missingInfoMode={missingInfoMode}
               mode={mode}
               pdfUploading={pdfUploading}
               pdfUploadStatus={pdfUploadStatus}
@@ -713,6 +719,7 @@ export default function HomePage() {
               onHumanizerTextChange={setHumanizerText}
               onHumanizerToneChange={setHumanizerTone}
               onModeChange={switchMode}
+              onMissingInfoModeChange={setMissingInfoMode}
               onPdfUpload={handlePdfUpload}
               onPowerpointPromptChange={setPowerpointPrompt}
               onRubricChange={setRubric}
@@ -756,6 +763,7 @@ function PreSignupAssignmentPage(props: {
   citationStyle: string;
   draftType: string;
   landingError: string;
+  missingInfoMode: string;
   pdfUploading: boolean;
   pdfUploadStatus: string;
   rubric: string;
@@ -764,6 +772,7 @@ function PreSignupAssignmentPage(props: {
   onCitationStyleChange: (value: string) => void;
   onDraftTypeChange: (value: string) => void;
   onGenerate: () => void;
+  onMissingInfoModeChange: (value: string) => void;
   onPdfUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   onPromptChange: (value: string) => void;
   onRubricChange: (value: string) => void;
@@ -804,6 +813,7 @@ function PreSignupAssignmentPage(props: {
                 <SelectField label="Draft type" value={props.draftType} onChange={props.onDraftTypeChange} options={draftTypes} />
                 <SelectField label="Citation" value={props.citationStyle} onChange={props.onCitationStyleChange} options={citationStyles} />
                 <SelectField label="Words" value={props.wordCount} onChange={props.onWordCountChange} options={wordCounts} />
+                <SelectField label="Missing info" value={props.missingInfoMode} onChange={props.onMissingInfoModeChange} options={missingInfoModes} />
                 <TextAreaField label="Rubric / marking criteria" value={props.rubric} onChange={props.onRubricChange} placeholder="Optional: paste marking criteria, learning outcomes, grade descriptors, or tutor notes." />
                 <TextAreaField label="Extra information" value={props.sources} onChange={props.onSourcesChange} placeholder="Optional: paste source notes, required readings, your draft, tutor instructions, preferred argument, or evidence." />
               </div>
@@ -846,6 +856,7 @@ function ToolComposer(props: {
   humanizerText: string;
   humanizerTone: string;
   loading: boolean;
+  missingInfoMode: string;
   mode: Mode;
   pdfUploading: boolean;
   pdfUploadStatus: string;
@@ -862,6 +873,7 @@ function ToolComposer(props: {
   onHumanizerTextChange: (value: string) => void;
   onHumanizerToneChange: (value: string) => void;
   onModeChange: (mode: Mode) => void;
+  onMissingInfoModeChange: (value: string) => void;
   onPdfUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   onPowerpointPromptChange: (value: string) => void;
   onRubricChange: (value: string) => void;
@@ -903,6 +915,7 @@ function ToolComposer(props: {
             <SelectField label="Draft type" value={props.draftType} onChange={props.onDraftTypeChange} options={draftTypes} />
             <SelectField label="Citation" value={props.citationStyle} onChange={props.onCitationStyleChange} options={citationStyles} />
             <SelectField label="Words" value={props.wordCount} onChange={props.onWordCountChange} options={wordCounts} />
+            <SelectField label="Missing info" value={props.missingInfoMode} onChange={props.onMissingInfoModeChange} options={missingInfoModes} />
             <TextAreaField label="Rubric / marking criteria" value={props.rubric} onChange={props.onRubricChange} placeholder="Optional: paste marking criteria, learning outcomes, grade descriptors, or tutor notes." />
             <TextAreaField label="Extra information" value={props.sources} onChange={props.onSourcesChange} placeholder="Optional: paste source notes, required readings, your draft, tutor instructions, preferred argument, or evidence." />
           </>

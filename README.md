@@ -21,14 +21,17 @@ The app opens on the Assignment Writer. Visitors can paste or upload a brief fir
 ## Assignment Writer Pipeline
 
 1. **Intake:** code reads pasted text or extracts text from a PDF.
-2. **Brief analyzer:** AI identifies the task, word count, citation style, marking priorities, constraints, and missing information.
-3. **Section planner:** AI creates only real assignment/report sections. Marking criteria such as referencing, grammar, structure, spelling, presentation, and formatting are integrated across the draft, not treated as standalone sections.
-4. **Section writer:** AI writes the planned sections using only supplied project details. Missing sources are left as placeholders.
-5. **Section word counter:** code checks each section against its 90% to 110% target range.
-6. **Section rewriter:** AI rewrites only sections that fail the code word-count check.
-7. **Humanizer/editor:** AI polishes the verified draft without adding facts, sources, or hidden planning notes.
-8. **Reference sorter:** code extracts citation placeholders and source lines, deduplicates them, and sorts them alphabetically.
-9. **Final word counter:** code checks the final report draft and adds a short notice if the count still needs review.
+2. **Structured brief parser:** AI returns strict JSON for task type, word count, citation style, marking priorities, missing information, integrated quality criteria, and real content sections.
+3. **Missing-information choice:** the user can ask AssignAI to stop and request missing details, or continue with inline placeholders.
+4. **Rubric mapper:** administrative criteria such as referencing, grammar, structure, spelling, formatting, and presentation are integrated across the answer, not treated as standalone sections.
+5. **Evidence planner:** AI maps each section to claims, evidence needs, supplied details, and source placeholders.
+6. **Section writer:** AI writes the planned sections using only supplied project details. Every supported claim must have an inline citation or inline source placeholder where the claim appears.
+7. **Section word counter:** code checks each section against its 90% to 110% target range.
+8. **Section rewriter:** AI rewrites only sections that fail the code word-count check.
+9. **Quality critic:** AI checks for missing sections, generic writing, invented facts, uncited claims, and rubric misses before humanizing.
+10. **Humanizer/editor:** AI polishes the verified draft without adding facts, sources, or hidden planning notes.
+11. **Reference sorter:** code extracts citation placeholders and source lines, deduplicates them, and sorts real references alphabetically at the bottom. Missing evidence stays in a separate `Sources Needed` list.
+12. **Final word counter:** code checks the final report draft and adds a short notice if the count still needs review.
 
 The user-facing output should be the assignment/report draft, alphabetized references, and word-count note only. It should not expose brief analysis, section planning, pipeline stages, or internal checklists.
 

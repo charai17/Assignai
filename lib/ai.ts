@@ -59,6 +59,27 @@ type SectionWordReport = WordCountReport & {
   adjusted: boolean;
 };
 
+type MissingInfoMode = "ask" | "continue";
+
+type AssignmentBriefAnalysis = {
+  assignmentTopic?: string;
+  taskType?: string;
+  wordCount?: number;
+  citationStyle?: string;
+  markerPriorities?: string[];
+  missingInformation?: string[];
+  canWriteFullDraft?: boolean;
+  sections?: Array<{
+    title: string;
+    targetWords: number;
+    purpose: string;
+    rubricLinks?: string[];
+    evidenceNeeded?: string[];
+  }>;
+  integratedQualityCriteria?: string[];
+  mustNotInvent?: string[];
+};
+
 const HUMANIZER_POLICY = `Natural writing policy adapted from blader/humanizer v2.7.0 (MIT). Use it as editing guidance for clarity, voice, and readability, not as a promise to bypass detectors.
 
 Core rules:
@@ -127,6 +148,70 @@ async function generateAssignmentPipeline({
   const lower = Math.ceil(targetWords * 0.9);
   const upper = Math.floor(targetWords * 1.1);
   const sharedContext = assignmentContext(input, payload, targetWords);
+  const missingInfoMode = getMissingInfoMode(payload);
+
+  const structuredAnalysisResult = await callAiChat({
+    config,
+    requestId,
+    stage: "structured-brief-analysis",
+    temperature: 0.1,
+    system: assignmentPipelineSystem("structured brief parser"),
+    prompt: `${sharedContext}
+
+Stage 1: Parse the assignment brief into strict JSON.
+
+Return only valid JSON. Do not use markdown fences.
+
+Schema:
+{
+  "assignmentTopic": "string",
+  "taskType": "essay | report | reflection | case study | literature review | other",
+  "wordCount": number,
+  "citationStyle": "string",
+  "markerPriorities": ["string"],
+  "missingInformation": ["string"],
+  "canWriteFullDraft": boolean,
+  "integratedQualityCriteria": ["referencing, spelling, grammar, formatting, presentation, structure criteria that should be integrated, not used as sections"],
+  "mustNotInvent": ["project facts, organisations, software names, statistics, named sources, dates, outcomes, or other details that are not supplied"],
+  "sections": [
+    {
+      "title": "real assignment section title",
+      "targetWords": number,
+      "purpose": "what this section must do",
+      "rubricLinks": ["which marking criteria this section satisfies"],
+      "evidenceNeeded": ["claims or evidence needed, including citation placeholders if sources are missing"]
+    }
+  ]
+}
+
+Rules:
+- Section targetWords must add up to exactly ${targetWords}.
+- Create only real content sections that belong in the final assignment/report.
+- Never create sections for referencing, structure, spelling, grammar, formatting, presentation, or word count. Put those in integratedQualityCriteria.
+- If the brief asks for two documents to be appraised, create one section for the appraisal and describe the two document slots in purpose/evidenceNeeded.
+- If user-supplied information is not enough for a high-quality full draft, set canWriteFullDraft to false and list the exact missingInformation.
+- Even when canWriteFullDraft is false, still provide the best possible section plan using placeholders.`,
+  });
+
+  const structuredAnalysis = structuredAnalysisResult.ok ? parseAssignmentAnalysis(structuredAnalysisResult.text) : null;
+
+  if (structuredAnalysis && missingInfoMode === "ask" && shouldAskForMissingInfo(structuredAnalysis)) {
+    return {
+      status: 200,
+      result: {
+        ok: true,
+        result: formatMissingInformationPrompt(structuredAnalysis),
+        raw: {
+          requestId,
+          provider: config.ai.provider,
+          model: activeModel(config),
+          pipeline: ["structured-brief-analysis", "missing-information-check"],
+          action: "needs-more-information",
+          analysis: structuredAnalysis,
+        },
+      },
+    };
+  }
 
   const analysis = await callAiChat({
     config,
@@ -163,6 +248,39 @@ List the writing order and what each stage must achieve.`,
   });
 
   if (!analysis.ok) return assignmentStageError("analysis", analysis, requestId, config.ai.provider);
+  const approvedAnalysis = structuredAnalysis ? formatStructuredAnalysis(structuredAnalysis, targetWords) : analysis.text;
+  const sectionTargets = structuredAnalysis?.sections?.length
+    ? sectionTargetsFromStructuredAnalysis(structuredAnalysis, targetWords)
+    : extractSectionTargets(analysis.text, targetWords);
+
+  const evidencePlan = await callAiChat({
+    config,
+    requestId,
+    stage: "evidence-plan",
+    temperature: 0.15,
+    system: assignmentPipelineSystem("evidence planner"),
+    prompt: `${sharedContext}
+
+Approved structured brief analysis and section plan:
+${approvedAnalysis}
+
+Stage 2: Build an evidence plan for the draft.
+
+Return markdown with one heading per planned section.
+
+For each section include:
+- Claims this section should make.
+- Evidence required for those claims.
+- Supplied details or sources that can be used.
+- Citation placeholders needed where sources are missing.
+
+Rules:
+- Every factual or theoretical claim that needs evidence must either use a user-supplied source/citation or include an inline placeholder like [Add source: author/year for claim about X].
+- Do not invent authors, books, journal articles, URLs, DOI values, page numbers, data, organisations, software names, dates, or project outcomes.
+- Keep placeholders specific enough that the user knows what source to add.`,
+  });
+
+  if (!evidencePlan.ok) return assignmentStageError("evidence planning", evidencePlan, requestId, config.ai.provider);
 
   const sectionDraft = await callAiChat({
     config,
@@ -173,9 +291,12 @@ List the writing order and what each stage must achieve.`,
     prompt: `${sharedContext}
 
 Use this approved analysis and plan:
-${analysis.text}
+${approvedAnalysis}
 
-Stage 2: Write the assignment section by section.
+Use this evidence plan:
+${evidencePlan.text}
+
+Stage 3: Write the assignment section by section.
 
 Rules:
 - Follow the section plan and word counts as closely as possible.
@@ -183,7 +304,7 @@ Rules:
 - Use clear headings that match the section plan.
 - You must write every section in the section plan. Do not stop after the introduction.
 - Use only details the user supplied. Do not invent the organisation, industry, staff roles, software names, books, journal articles, URLs, DOI values, page numbers, quotes, statistics, or named authors.
-- When evidence is needed but the user did not provide a source, use inline placeholders like [Add source: author/year for claim about X].
+- Every claim that needs support must have an inline citation or an inline placeholder where the claim is made.
 - Do not add "References used in this section" lists.
 - Do not include brief analysis, writing plans, word-count checks, notes to the user, or final checklists.
 - Return only the assignment/report draft.`,
@@ -191,12 +312,11 @@ Rules:
 
   if (!sectionDraft.ok) return assignmentStageError("section drafting", sectionDraft, requestId, config.ai.provider);
 
-  const sectionTargets = extractSectionTargets(analysis.text, targetWords);
   const completedSectionDraft = await completeMissingDraftSections({
     config,
     requestId,
     sharedContext,
-    analysis: analysis.text,
+    analysis: approvedAnalysis,
     sectionDraft: sectionDraft.text,
     sectionTargets,
   });
@@ -205,11 +325,80 @@ Rules:
     config,
     requestId,
     sharedContext,
-    analysis: analysis.text,
+    analysis: approvedAnalysis,
     sectionDraft: completedSectionDraft.draft,
     sectionTargets,
   });
-  const verifiedSectionDraft = sectionVerification.draft;
+  let verifiedSectionDraft = sectionVerification.draft;
+
+  const qualityReview = await callAiChat({
+    config,
+    requestId,
+    stage: "quality-critic",
+    temperature: 0.1,
+    system: assignmentPipelineSystem("quality critic"),
+    prompt: `${sharedContext}
+
+Approved structured brief analysis:
+${approvedAnalysis}
+
+Evidence plan:
+${evidencePlan.text}
+
+Draft to review:
+${verifiedSectionDraft}
+
+Stage 5: Critically review the draft before humanizing.
+
+Return only one of these:
+PASS
+or
+ISSUES:
+- issue
+- issue
+
+Check:
+- The draft answers the actual brief and rubric.
+- All planned real sections are present.
+- Administrative criteria are not used as standalone sections.
+- Claims that need evidence have inline citations or source placeholders where the claim is made.
+- The draft does not invent project facts, organisations, software names, statistics, authors, dates, URLs, DOI values, or page numbers.
+- The draft is not generic when the brief supplied specific details.`,
+  });
+
+  if (qualityReview.ok && /^ISSUES:/i.test(qualityReview.text.trim())) {
+    const repairedDraft = await callAiChat({
+      config,
+      requestId,
+      stage: "quality-rewrite",
+      temperature: 0.25,
+      system: assignmentPipelineSystem("quality rewrite"),
+      prompt: `${sharedContext}
+
+Approved structured brief analysis:
+${approvedAnalysis}
+
+Evidence plan:
+${evidencePlan.text}
+
+Quality issues to fix:
+${qualityReview.text}
+
+Draft to repair:
+${verifiedSectionDraft}
+
+Rewrite the draft to fix only the listed quality issues.
+
+Rules:
+- Preserve all planned section headings.
+- Keep all citation placeholders inline where evidence is needed.
+- Do not invent facts, sources, references, data, URLs, DOI values, page numbers, organisations, software names, dates, or outcomes.
+- Do not add planning notes, quality checks, or reference lists.
+- Return only the repaired assignment/report draft.`,
+    });
+
+    if (repairedDraft.ok && repairedDraft.text) verifiedSectionDraft = repairedDraft.text;
+  }
 
   const humanizedDraft = await callAiChat({
     config,
@@ -219,7 +408,7 @@ Rules:
     system: assignmentPipelineSystem("humanize"),
     prompt: `${sharedContext}
 
-Stage 4: Humanize and polish the verified section draft into one coherent final draft.
+Stage 6: Humanize and polish the verified section draft into one coherent final draft.
 
 Target word count: ${targetWords}
 Accepted code-counted range for the full draft: ${lower} to ${upper} words
@@ -227,6 +416,7 @@ Accepted code-counted range for the full draft: ${lower} to ${upper} words
 Important:
 - The section draft below has already been checked section by section with code.
 - Preserve the section headings, section balance, citations, and source placeholders.
+- Preserve inline citations and placeholders exactly where the supported claim appears.
 - Do not allow humanizing to make any section much longer or shorter.
 - Remove any accidental "References used in this section" blocks.
 - Return a clean assignment/report draft only.
@@ -260,6 +450,7 @@ Accepted range: ${lower} to ${upper}
 
 Rules:
 - Preserve the argument, section headings, citations, and source placeholders.
+- Keep inline citations and placeholders attached to the claims they support.
 - Keep section proportions close to the verified section draft.
 - If the draft is too short, add useful analysis instead of filler.
 - If the draft is too long, tighten wording without deleting key evidence.
@@ -300,10 +491,13 @@ ${wordCountSection}`,
         model: activeModel(config),
         pipeline: [
           "analysis",
+          structuredAnalysis ? "structured-section-plan" : "fallback-section-plan",
+          "evidence-plan",
           "section-draft",
           completedSectionDraft.addedCount > 0 ? "missing-section-fill" : "section-completeness-check",
           "section-word-count-check",
           sectionVerification.adjustedCount > 0 ? "section-rewrite-loop" : "section-check-pass",
+          qualityReview.ok && /^ISSUES:/i.test(qualityReview.text.trim()) ? "quality-rewrite" : "quality-pass",
           "humanize-draft",
           adjusted ? "final-word-count-adjustment" : "final-word-count-check",
           "reference-sort",
@@ -543,6 +737,132 @@ Rules:
 - Never turn marking criteria like referencing, structure, spelling, grammar, presentation, or formatting into standalone report sections.
 
 ${HUMANIZER_POLICY}`;
+}
+
+function parseAssignmentAnalysis(text: string): AssignmentBriefAnalysis | null {
+  const parsed = parseJsonObject(text);
+  if (!parsed) return null;
+
+  const record = parsed as Record<string, unknown>;
+  const sections = Array.isArray(record.sections)
+    ? record.sections
+        .map((section) => {
+          if (!section || typeof section !== "object" || Array.isArray(section)) return null;
+          const item = section as Record<string, unknown>;
+          const title = stringValue(item.title, "").trim();
+          const targetWords = typeof item.targetWords === "number"
+            ? item.targetWords
+            : typeof item.targetWords === "string"
+              ? Number.parseInt(item.targetWords, 10)
+              : Number.NaN;
+          if (!title || !Number.isFinite(targetWords) || targetWords <= 0 || isNonContentSectionTitle(title)) return null;
+
+          return {
+            title,
+            targetWords,
+            purpose: stringValue(item.purpose, "Draft this section according to the brief."),
+            rubricLinks: stringArray(item.rubricLinks),
+            evidenceNeeded: stringArray(item.evidenceNeeded),
+          };
+        })
+        .filter((section): section is NonNullable<typeof section> => Boolean(section))
+    : [];
+
+  return {
+    assignmentTopic: stringValue(record.assignmentTopic, ""),
+    taskType: stringValue(record.taskType, ""),
+    wordCount: typeof record.wordCount === "number" ? record.wordCount : undefined,
+    citationStyle: stringValue(record.citationStyle, ""),
+    markerPriorities: stringArray(record.markerPriorities),
+    missingInformation: stringArray(record.missingInformation),
+    canWriteFullDraft: typeof record.canWriteFullDraft === "boolean" ? record.canWriteFullDraft : sections.length > 0,
+    sections,
+    integratedQualityCriteria: stringArray(record.integratedQualityCriteria),
+    mustNotInvent: stringArray(record.mustNotInvent),
+  };
+}
+
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  const cleaned = text.trim().replace(/^```(?:json)?/i, "").replace(/```$/i, "").trim();
+  const direct = tryParseJson(cleaned);
+  if (direct) return direct;
+
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start >= 0 && end > start) return tryParseJson(cleaned.slice(start, end + 1));
+  return null;
+}
+
+function tryParseJson(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => typeof item === "string" ? item.trim() : "").filter(Boolean);
+}
+
+function shouldAskForMissingInfo(analysis: AssignmentBriefAnalysis): boolean {
+  const missing = analysis.missingInformation?.filter((item) => item.trim()) ?? [];
+  return analysis.canWriteFullDraft === false && missing.length > 0;
+}
+
+function formatMissingInformationPrompt(analysis: AssignmentBriefAnalysis): string {
+  const missing = (analysis.missingInformation || []).filter(Boolean);
+  const questions = missing.length
+    ? missing.map((item) => `- ${item}`).join("\n")
+    : "- Any project details, required sources, or tutor instructions that are not in the brief.";
+
+  return `# More Information Needed
+
+I can write this with placeholders, but the brief is missing details that would affect the quality of the assignment.
+
+Please add:
+${questions}
+
+You can also switch the missing-information setting to "Continue with placeholders" and generate anyway. If you continue, I will keep unsupported claims as inline source placeholders and avoid inventing facts.`;
+}
+
+function formatStructuredAnalysis(analysis: AssignmentBriefAnalysis, targetWords: number): string {
+  const sections = sectionTargetsFromStructuredAnalysis(analysis, targetWords);
+  const sectionLines = sections.map((section) => {
+    const source = analysis.sections?.find((item) => normalizeTitle(item.title) === normalizeTitle(section.title));
+    const purpose = source?.purpose || "Draft this section according to the brief.";
+    const evidence = source?.evidenceNeeded?.length ? ` Evidence needed: ${source.evidenceNeeded.join("; ")}.` : "";
+    return `- ${section.title}: ${section.target} words. ${purpose}${evidence}`;
+  });
+
+  return `# Brief Analysis
+- What the assignment is about: ${analysis.assignmentTopic || "Not specified in detail."}
+- Task type: ${analysis.taskType || "Not specified"}
+- Selected or inferred word count: ${targetWords}
+- Selected or inferred citation style: ${analysis.citationStyle || "Not specified"}
+- What the marker is likely looking for: ${(analysis.markerPriorities || []).join("; ") || "Follow the rubric and answer the brief directly."}
+- Missing information that affects quality: ${(analysis.missingInformation || []).join("; ") || "None flagged."}
+- Quality criteria to integrate across the draft: ${(analysis.integratedQualityCriteria || []).join("; ") || "Referencing, structure, clarity, spelling, and grammar."}
+- Must not invent: ${(analysis.mustNotInvent || []).join("; ") || "Facts, sources, statistics, project details, and citations not supplied by the user."}
+
+# Section Plan With Word Counts
+${sectionLines.join("\n")}
+
+# Writing Plan
+Write each section in order, cite claims inline, use placeholders where evidence is missing, then run section word-count checks before humanizing.`;
+}
+
+function sectionTargetsFromStructuredAnalysis(analysis: AssignmentBriefAnalysis, totalTarget: number): SectionTarget[] {
+  const targets = (analysis.sections || [])
+    .map((section) => ({
+      title: section.title,
+      target: Math.max(50, Math.round(section.targetWords)),
+    }))
+    .filter((section) => section.title && !isNonContentSectionTitle(section.title) && section.target > 0);
+
+  return targets.length ? normalizeSectionTargets(targets, totalTarget) : fallbackSectionTargets(totalTarget);
 }
 
 function hasConfiguredAiProvider(config: ReturnType<typeof getConfig>): boolean {
@@ -901,6 +1221,11 @@ function getTargetWordCount(payload: Record<string, unknown>, input = ""): numbe
   return Math.max(250, Math.min(5000, Math.round(parsed)));
 }
 
+function getMissingInfoMode(payload: Record<string, unknown>): MissingInfoMode {
+  const value = stringValue(payload.missingInfoMode, "ask").toLowerCase();
+  return /continue|placeholder|generate/i.test(value) ? "continue" : "ask";
+}
+
 function inferWordCountFromBrief(input: string, payload: Record<string, unknown>): number {
   const text = [
     input,
@@ -1035,11 +1360,19 @@ function referenceSortKey(reference: string): string {
 
 function formatAlphabetizedReferences(references: string[], citationStyle: string): string {
   const sorted = sortReferencesAlphabetically(references);
-  const body = sorted.length ? sorted.map((reference) => `- ${reference}`).join("\n") : "- [Add source: author/year for each claim that needs evidence]";
-  return `# Alphabetized References
+  const realReferences = sorted.filter((reference) => !/^\[Add (source|full reference for):/i.test(reference));
+  const sourcePlaceholders = sorted.filter((reference) => /^\[Add (source|full reference for):/i.test(reference));
+  const referenceBody = realReferences.length
+    ? realReferences.map((reference) => `- ${reference}`).join("\n")
+    : "- Add full reference details for every inline citation before submission.";
+  const sourcesNeeded = sourcePlaceholders.length
+    ? `\n\n# Sources Needed\n${sourcePlaceholders.map((reference) => `- ${reference}`).join("\n")}`
+    : "";
+
+  return `# References
 Citation style: ${citationStyle}
 
-${body}`;
+${referenceBody}${sourcesNeeded}`;
 }
 
 function humanizeFallback(input: string): string {
