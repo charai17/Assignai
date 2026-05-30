@@ -132,12 +132,18 @@ function bearerToken(request: Request): string | null {
   return match?.[1]?.trim() || null;
 }
 
-export function databaseMode(kind: ToolKind): "assignment" | "humanizer" | "powerpoint" {
+export function databaseMode(kind: ToolKind): "assignment" | "references" | "humanizer" | "powerpoint" {
   return kind === "humanize" ? "humanizer" : kind;
 }
 
-export function titleFromInput(input: string, mode: "assignment" | "humanizer" | "powerpoint"): string {
-  const fallback = mode === "assignment" ? "AssignAI Assignment" : mode === "humanizer" ? "AssignAI Humanized Text" : "AssignAI Presentation";
+export function titleFromInput(input: string, mode: "assignment" | "references" | "humanizer" | "powerpoint"): string {
+  const fallback = mode === "assignment"
+    ? "AssignAI Assignment"
+    : mode === "references"
+      ? "AssignAI Referenced Draft"
+      : mode === "humanizer"
+        ? "AssignAI Humanized Text"
+        : "AssignAI Presentation";
   return input.replace(/\s+/g, " ").trim().slice(0, 80) || fallback;
 }
 

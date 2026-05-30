@@ -115,6 +115,10 @@ export async function generateResult({ kind, input, payload, requestId }: Genera
     return generateAssignmentPipeline({ input, payload, requestId, config });
   }
 
+  if (kind === "references") {
+    return generateReferencePipeline({ input, payload, requestId, config });
+  }
+
   const response = await callAiChat({
     config,
     requestId,
@@ -319,28 +323,6 @@ Rules:
   });
   let verifiedSectionDraft = sectionVerification.draft;
 
-  const citationStyle = chooseCitationStyle(payload, structuredAnalysis, input);
-  const citationPass = await citeDraftClaims({
-    draft: verifiedSectionDraft,
-    assignmentContext: `${input}\n${approvedAnalysis}\n${evidencePlan.text}`,
-    citationStyle,
-    requestId,
-  }).catch((error) => {
-    console.error("assignai citation pass failed", {
-      requestId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-
-    return {
-      citedDraft: verifiedSectionDraft,
-      references: [],
-      sourcesNeeded: extractReferenceCandidates(verifiedSectionDraft),
-      citedClaims: 0,
-      placeholderClaims: 0,
-    };
-  });
-  verifiedSectionDraft = citationPass.citedDraft;
-
   const humanizedSections = await humanizeSectionsIndividually({
     config,
     requestId,
@@ -355,12 +337,10 @@ Rules:
   let finalDraft = humanizedSections.text;
   let wordReport = buildWordCountReport(finalDraft, targetWords);
 
+  const citationStyle = chooseCitationStyle(payload, structuredAnalysis, input);
   const references = formatCitationSections({
-    references: citationPass.references,
-    sourcesNeeded: sortReferencesAlphabetically([
-      ...citationPass.sourcesNeeded,
-      ...extractReferenceCandidates(`${verifiedSectionDraft}\n\n${finalDraft}`).filter((reference) => /^\[Add (source|full reference for):/i.test(reference)),
-    ]),
+    references: [],
+    sourcesNeeded: extractReferenceCandidates(`${verifiedSectionDraft}\n\n${finalDraft}`),
     citationStyle,
   });
   const wordCountSection = formatWordCountReport(wordReport, false);
@@ -387,13 +367,76 @@ ${wordCountSection}`,
           completedSectionDraft.addedCount > 0 ? "missing-section-fill" : "section-completeness-check",
           "section-word-count-check",
           sectionVerification.adjustedCount > 0 ? "section-rewrite-loop" : "section-check-pass",
-          "claim-level-citation-pass",
           "humanize-sections",
           "final-word-count-check",
-          "reference-sort",
+          "source-placeholder-sort",
         ],
         wordCount: wordReport,
         sectionWordCounts: humanizedSections.reports,
+        citations: {
+          style: citationStyle,
+          action: "deferred-to-reference-adder",
+        },
+      },
+    },
+  };
+}
+
+async function generateReferencePipeline({
+  input,
+  payload,
+  requestId,
+  config,
+}: Omit<GenerateRequest, "kind"> & { config: ReturnType<typeof getConfig> }): Promise<GenerateResponse> {
+  const citationStyle = chooseCitationStyle(payload, null, input);
+  const assignmentContext = [
+    stringValue(payload.assignmentBrief, ""),
+    stringValue(payload.rubric, ""),
+    stringValue(payload.sources, ""),
+    stringValue(payload.context, ""),
+  ].filter(Boolean).join("\n\n") || input;
+
+  const citationPass = await citeDraftClaims({
+    draft: input,
+    assignmentContext,
+    citationStyle,
+    requestId,
+  }).catch((error) => {
+    console.error("assignai reference adder failed", {
+      requestId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+
+    return {
+      citedDraft: input,
+      references: [],
+      sourcesNeeded: extractReferenceCandidates(input),
+      citedClaims: 0,
+      placeholderClaims: 0,
+    };
+  });
+
+  const references = formatCitationSections({
+    references: citationPass.references,
+    sourcesNeeded: sortReferencesAlphabetically([
+      ...citationPass.sourcesNeeded,
+      ...extractReferenceCandidates(citationPass.citedDraft).filter((reference) => /^\[Add (source|full reference for):/i.test(reference)),
+    ]),
+    citationStyle,
+  });
+
+  return {
+    status: 200,
+    result: {
+      ok: true,
+      result: `${citationPass.citedDraft.trim()}
+
+${references}`,
+      raw: {
+        requestId,
+        provider: config.ai.provider,
+        model: activeModel(config),
+        pipeline: ["claim-level-citation-pass", "reference-sort"],
         citations: {
           style: citationStyle,
           citedClaims: citationPass.citedClaims,
@@ -1074,6 +1117,17 @@ Rules:
 ${HUMANIZER_POLICY}`;
   }
 
+  if (kind === "references") {
+    return `You are AssignAI's Reference Adder. The user will paste a finished academic draft. Add inline citations or source placeholders where claims need support, then produce an alphabetized reference list.
+
+Rules:
+- Preserve the user's draft wording as much as possible.
+- Do not invent quotes, statistics, page numbers, URLs, DOI values, or source details.
+- If a trustworthy source cannot be verified, use a precise inline placeholder.
+- Keep citations attached to the exact sentence they support.
+- Return the cited draft followed by references/sources needed.`;
+  }
+
   return `You are AssignAI's presentation assistant. Create PowerPoint-ready academic deck outlines with slide titles, concise bullets, suggested visuals, and speaker notes. Apply the natural writing policy so slide text is clear, specific, and not padded.
 
 ${HUMANIZER_POLICY}`;
@@ -1090,6 +1144,20 @@ Tone: ${stringValue(payload.tone, "Natural")}
 Return only the rewritten text. Do not include labels, explanations, notes, summaries, or markdown fences.
 
 Text:
+${input}`;
+  }
+
+  if (kind === "references") {
+    return `Add references to the finished academic draft below.
+
+Citation style: ${stringValue(payload.citationStyle, "Auto-detect")}
+
+Assignment context or brief:
+${stringValue(payload.assignmentBrief, "No extra assignment context provided.")}
+
+Return the cited draft and alphabetized references.
+
+Draft:
 ${input}`;
   }
 

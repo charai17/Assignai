@@ -17,7 +17,7 @@ export async function POST(request: Request) {
 
   const body = parsed.body;
   const kind = readKind(body);
-  if (!kind) return jsonResult({ ok: false, result: "Job kind must be assignment, humanize, or powerpoint.", raw: { requestId } }, 400, requestId);
+  if (!kind) return jsonResult({ ok: false, result: "Job kind must be assignment, references, humanize, or powerpoint.", raw: { requestId } }, 400, requestId);
 
   const validated = validateGenerationPayload(body, getConfig().limits.maxInputChars);
   if (!validated.ok) return jsonResult({ ok: false, result: validated.error, raw: { requestId } }, 400, requestId);
@@ -49,7 +49,7 @@ export async function POST(request: Request) {
 function readKind(body: unknown): ToolKind | null {
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;
   const value = (body as Record<string, unknown>).kind || (body as Record<string, unknown>).mode;
-  if (value === "assignment" || value === "humanize" || value === "powerpoint") return value;
+  if (value === "assignment" || value === "references" || value === "humanize" || value === "powerpoint") return value;
   if (value === "humanizer") return "humanize";
   return null;
 }

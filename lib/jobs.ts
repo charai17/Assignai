@@ -3,7 +3,7 @@ import type { ToolKind } from "./api";
 import { databaseMode, getAuthenticatedSupabase, sanitizeMetadata, titleFromInput } from "./persistence";
 
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
-export type JobMode = "assignment" | "humanizer" | "powerpoint";
+export type JobMode = "assignment" | "references" | "humanizer" | "powerpoint";
 
 export type GenerationJob = {
   id: string;

@@ -4,7 +4,7 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient, hasSupabaseConfig } from "@/lib/supabase";
 
-type Mode = "assignment" | "humanizer" | "powerpoint";
+type Mode = "assignment" | "references" | "humanizer" | "powerpoint";
 type AuthMode = "sign-in" | "sign-up";
 
 type ApiResponse = {
@@ -75,6 +75,14 @@ const modeCopy: Record<Mode, { label: string; icon: string; eyebrow: string; out
     cta: "Analyze and write",
     placeholder: "Paste the full assignment brief or question here. Include the task, topic, deadline notes, and anything your tutor specifically asked for...",
   },
+  references: {
+    label: "Reference Adder",
+    icon: "R",
+    eyebrow: "Citation workspace",
+    output: "Cited draft + references",
+    cta: "Add references",
+    placeholder: "Paste the finished assignment draft here. I will scan claims, add inline citations or source placeholders, and build an alphabetized reference list...",
+  },
   humanizer: {
     label: "Humanizer",
     icon: "H",
@@ -104,6 +112,7 @@ export default function HomePage() {
   const [wordCount, setWordCount] = useState(wordCounts[0]);
   const [missingInfoMode, setMissingInfoMode] = useState(missingInfoModes[0]);
   const [humanizerText, setHumanizerText] = useState("");
+  const [referenceText, setReferenceText] = useState("");
   const [humanizerTone, setHumanizerTone] = useState(humanizerTones[0]);
   const [powerpointPrompt, setPowerpointPrompt] = useState("");
   const [slideCount, setSlideCount] = useState(slideCounts[2]);
@@ -153,9 +162,10 @@ export default function HomePage() {
 
   const activeInput = useMemo(() => {
     if (mode === "assignment") return assignmentPrompt.trim();
+    if (mode === "references") return referenceText.trim();
     if (mode === "humanizer") return humanizerText.trim();
     return powerpointPrompt.trim();
-  }, [assignmentPrompt, humanizerText, mode, powerpointPrompt]);
+  }, [assignmentPrompt, humanizerText, mode, powerpointPrompt, referenceText]);
 
   const authProps: AccountPanelProps = {
     authMode,
@@ -593,6 +603,7 @@ export default function HomePage() {
 
   function endpointForMode(currentMode: Mode) {
     if (currentMode === "assignment") return "/api/assignment";
+    if (currentMode === "references") return "/api/references";
     if (currentMode === "humanizer") return "/api/humanize";
     return "/api/powerpoint";
   }
@@ -640,11 +651,23 @@ export default function HomePage() {
       return { input: humanizerText, text: humanizerText, tone: humanizerTone };
     }
 
+    if (currentMode === "references") {
+      return {
+        input: referenceText,
+        text: referenceText,
+        citationStyle,
+        assignmentBrief: assignmentPrompt,
+        rubric,
+        sources,
+      };
+    }
+
     return { input: powerpointPrompt, topic: powerpointPrompt, audience, slideCount: Number(slideCount), style: deckStyle };
   }
 
   function documentTitle() {
     if (mode === "assignment") return assignmentPrompt.replace(/\s+/g, " ").slice(0, 80) || "AssignAI Assignment";
+    if (mode === "references") return "AssignAI Referenced Draft";
     if (mode === "humanizer") return "AssignAI Humanized Text";
     return "AssignAI Output";
   }
@@ -663,7 +686,7 @@ export default function HomePage() {
           </div>
 
           <nav className="mt-4 flex gap-2 overflow-x-auto pb-1 lg:mt-8 lg:flex-col lg:overflow-visible lg:pb-0" aria-label="AssignAI tools">
-            {(["assignment", "humanizer", "powerpoint"] as Mode[]).map((item) => (
+            {(["assignment", "references", "humanizer", "powerpoint"] as Mode[]).map((item) => (
               <SidebarButton key={item} active={mode === item} icon={modeCopy[item].icon} label={modeCopy[item].label} onClick={() => switchMode(item)} />
             ))}
           </nav>
@@ -719,6 +742,7 @@ export default function HomePage() {
               pdfUploading={pdfUploading}
               pdfUploadStatus={pdfUploadStatus}
               powerpointPrompt={powerpointPrompt}
+              referenceText={referenceText}
               rubric={rubric}
               slideCount={slideCount}
               sources={sources}
@@ -734,6 +758,7 @@ export default function HomePage() {
               onMissingInfoModeChange={setMissingInfoMode}
               onPdfUpload={handlePdfUpload}
               onPowerpointPromptChange={setPowerpointPrompt}
+              onReferenceTextChange={setReferenceText}
               onRubricChange={setRubric}
               onSlideCountChange={setSlideCount}
               onSourcesChange={setSources}
@@ -873,6 +898,7 @@ function ToolComposer(props: {
   pdfUploading: boolean;
   pdfUploadStatus: string;
   powerpointPrompt: string;
+  referenceText: string;
   rubric: string;
   slideCount: string;
   sources: string;
@@ -888,6 +914,7 @@ function ToolComposer(props: {
   onMissingInfoModeChange: (value: string) => void;
   onPdfUpload: (event: ChangeEvent<HTMLInputElement>) => void;
   onPowerpointPromptChange: (value: string) => void;
+  onReferenceTextChange: (value: string) => void;
   onRubricChange: (value: string) => void;
   onSlideCountChange: (value: string) => void;
   onSourcesChange: (value: string) => void;
@@ -899,7 +926,7 @@ function ToolComposer(props: {
   return (
     <form onSubmit={props.onSubmit} className="rounded-[2rem] border border-stone-200 bg-[#fffdf8] p-3 shadow-[0_24px_80px_rgba(68,53,35,0.10)]">
       <div className="flex flex-wrap gap-2 border-b border-stone-100 px-2 pb-3 pt-1">
-        {(["assignment", "humanizer", "powerpoint"] as Mode[]).map((item) => (
+        {(["assignment", "references", "humanizer", "powerpoint"] as Mode[]).map((item) => (
           <ModePill key={item} active={props.mode === item} onClick={() => props.onModeChange(item)}>{modeCopy[item].label}</ModePill>
         ))}
       </div>
@@ -909,9 +936,10 @@ function ToolComposer(props: {
       <label className="block px-1 pt-3">
         <span className="sr-only">{copy.label} prompt</span>
         <textarea
-          value={props.mode === "assignment" ? props.assignmentPrompt : props.mode === "humanizer" ? props.humanizerText : props.powerpointPrompt}
+          value={props.mode === "assignment" ? props.assignmentPrompt : props.mode === "references" ? props.referenceText : props.mode === "humanizer" ? props.humanizerText : props.powerpointPrompt}
           onChange={(event) => {
             if (props.mode === "assignment") props.onAssignmentPromptChange(event.target.value);
+            if (props.mode === "references") props.onReferenceTextChange(event.target.value);
             if (props.mode === "humanizer") props.onHumanizerTextChange(event.target.value);
             if (props.mode === "powerpoint") props.onPowerpointPromptChange(event.target.value);
           }}
@@ -930,6 +958,15 @@ function ToolComposer(props: {
             <SelectField label="Missing info" value={props.missingInfoMode} onChange={props.onMissingInfoModeChange} options={missingInfoModes} />
             <TextAreaField label="Rubric / marking criteria" value={props.rubric} onChange={props.onRubricChange} placeholder="Optional: paste marking criteria, learning outcomes, grade descriptors, or tutor notes." />
             <TextAreaField label="Extra information" value={props.sources} onChange={props.onSourcesChange} placeholder="Optional: paste source notes, required readings, your draft, tutor instructions, preferred argument, or evidence." />
+          </>
+        ) : null}
+
+        {props.mode === "references" ? (
+          <>
+            <SelectField label="Citation" value={props.citationStyle} onChange={props.onCitationStyleChange} options={citationStyles} />
+            <TextAreaField label="Assignment context" value={props.assignmentPrompt} onChange={props.onAssignmentPromptChange} placeholder="Optional: paste the brief or topic so the reference scan understands the assignment." />
+            <TextAreaField label="Source notes" value={props.sources} onChange={props.onSourcesChange} placeholder="Optional: paste required readings, articles, URLs, DOIs, or sources your tutor expects." />
+            <TextAreaField label="Rubric" value={props.rubric} onChange={props.onRubricChange} placeholder="Optional: paste marking criteria or citation rules." />
           </>
         ) : null}
 
@@ -1064,18 +1101,21 @@ function LogoBlock() {
 
 function inputErrorForMode(mode: Mode): string {
   if (mode === "assignment") return "Paste the assignment brief or describe what you need to write.";
+  if (mode === "references") return "Paste the finished assignment draft to add references.";
   if (mode === "humanizer") return "Paste text to humanize.";
   return "Describe the presentation you want created.";
 }
 
 function footerForMode(mode: Mode): string {
-  if (mode === "assignment") return "Assignment Writer analyzes the brief, plans sections, writes them, then humanizes the final draft.";
+  if (mode === "assignment") return "Assignment Writer analyzes the brief, writes sections, checks word counts, then humanizes the final draft.";
+  if (mode === "references") return "Reference Adder scans a finished draft, adds inline citations or source placeholders, and builds the reference list.";
   if (mode === "humanizer") return "Humanizer rewrites pasted text and returns only the improved version.";
   return "PowerPoint Creator builds a slide outline first, then exports a `.pptx` deck.";
 }
 
 function loadingTextForMode(mode: Mode): string {
   if (mode === "assignment") return "Analyzing and writing...";
+  if (mode === "references") return "Scanning claims and adding references...";
   if (mode === "humanizer") return "Humanizing text...";
   return "Creating slides...";
 }

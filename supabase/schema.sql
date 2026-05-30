@@ -12,7 +12,7 @@ create table if not exists public.projects (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   title text not null default 'Untitled project',
-  kind text not null check (kind in ('assignment', 'humanizer', 'powerpoint')),
+  kind text not null check (kind in ('assignment', 'references', 'humanizer', 'powerpoint')),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -21,7 +21,7 @@ create table if not exists public.generations (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
   project_id uuid references public.projects(id) on delete set null,
-  mode text not null check (mode in ('assignment', 'humanizer', 'powerpoint')),
+  mode text not null check (mode in ('assignment', 'references', 'humanizer', 'powerpoint')),
   title text not null,
   input text not null,
   output text not null,
@@ -32,7 +32,7 @@ create table if not exists public.generations (
 create table if not exists public.usage_events (
   id uuid primary key default gen_random_uuid(),
   user_id uuid references auth.users(id) on delete cascade,
-  mode text not null check (mode in ('assignment', 'humanizer', 'powerpoint')),
+  mode text not null check (mode in ('assignment', 'references', 'humanizer', 'powerpoint')),
   input_chars integer not null default 0,
   output_chars integer not null default 0,
   model text,
@@ -42,7 +42,7 @@ create table if not exists public.usage_events (
 create table if not exists public.generation_jobs (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
-  mode text not null check (mode in ('assignment', 'humanizer', 'powerpoint')),
+  mode text not null check (mode in ('assignment', 'references', 'humanizer', 'powerpoint')),
   status text not null default 'queued' check (status in ('queued', 'running', 'completed', 'failed', 'cancelled')),
   title text not null default 'Untitled generation',
   input text not null,

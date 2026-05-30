@@ -29,7 +29,7 @@ type OpenAlexWork = {
   authorships?: Array<{ author?: { display_name?: string } }>;
 };
 
-const MAX_CLAIMS_TO_RESEARCH = 8;
+const MAX_CLAIMS_TO_RESEARCH = 30;
 const SOURCE_LOOKUP_TIMEOUT_MS = 3_500;
 const MIN_CLAIM_WORDS = 7;
 

@@ -9,7 +9,7 @@ export type ApiResult = {
   raw?: unknown;
 };
 
-export type ToolKind = "assignment" | "humanize" | "powerpoint";
+export type ToolKind = "assignment" | "humanize" | "powerpoint" | "references";
 
 export type ValidatedPayload = {
   input: string;
