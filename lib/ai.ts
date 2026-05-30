@@ -47,6 +47,10 @@ type WordCountReport = {
 type SectionTarget = {
   title: string;
   target: number;
+  purpose?: string;
+  rubricLinks?: string[];
+  evidenceNeeded?: string[];
+  toneAndApproach?: string;
 };
 
 type DraftSection = {
@@ -76,6 +80,7 @@ type AssignmentBriefAnalysis = {
     purpose: string;
     rubricLinks?: string[];
     evidenceNeeded?: string[];
+    toneAndApproach?: string;
   }>;
   integratedQualityCriteria?: string[];
   mustNotInvent?: string[];
@@ -180,7 +185,8 @@ Schema:
       "targetWords": number,
       "purpose": "what this section must do",
       "rubricLinks": ["which marking criteria this section satisfies"],
-      "evidenceNeeded": ["claims or evidence needed, including citation placeholders if sources are missing"]
+      "evidenceNeeded": ["claims or evidence needed, including citation placeholders if sources are missing"],
+      "toneAndApproach": "how this section should sound and argue"
     }
   ]
 }
@@ -283,32 +289,13 @@ Rules:
 
   if (!evidencePlan.ok) return assignmentStageError("evidence planning", evidencePlan, requestId, config.ai.provider);
 
-  const sectionDraft = await callAiChat({
+  const sectionDraft = await draftSectionsIndividually({
     config,
     requestId,
-    stage: "section-draft",
-    temperature: 0.35,
-    system: assignmentPipelineSystem("draft"),
-    prompt: `${sharedContext}
-
-Use this approved analysis and plan:
-${approvedAnalysis}
-
-Use this evidence plan:
-${evidencePlan.text}
-
-Stage 3: Write the assignment section by section.
-
-Rules:
-- Follow the section plan and word counts as closely as possible.
-- Use markdown headings for every assignment section.
-- Use clear headings that match the section plan.
-- You must write every section in the section plan. Do not stop after the introduction.
-- Use only details the user supplied. Do not invent the organisation, industry, staff roles, software names, books, journal articles, URLs, DOI values, page numbers, quotes, statistics, or named authors.
-- Every claim that needs support must have an inline citation or an inline placeholder where the claim is made.
-- Do not add "References used in this section" lists.
-- Do not include brief analysis, writing plans, word-count checks, notes to the user, or final checklists.
-- Return only the assignment/report draft.`,
+    sharedContext,
+    approvedAnalysis,
+    evidencePlan: evidencePlan.text,
+    sectionTargets,
   });
 
   if (!sectionDraft.ok) return assignmentStageError("section drafting", sectionDraft, requestId, config.ai.provider);
@@ -515,7 +502,7 @@ ${wordCountSection}`,
           "analysis",
           structuredAnalysis ? "structured-section-plan" : "fallback-section-plan",
           "evidence-plan",
-          "section-draft",
+          "section-draft-per-section",
           completedSectionDraft.addedCount > 0 ? "missing-section-fill" : "section-completeness-check",
           "section-word-count-check",
           sectionVerification.adjustedCount > 0 ? "section-rewrite-loop" : "section-check-pass",
@@ -615,6 +602,87 @@ Rules:
   };
 }
 
+async function draftSectionsIndividually({
+  config,
+  requestId,
+  sharedContext,
+  approvedAnalysis,
+  evidencePlan,
+  sectionTargets,
+}: {
+  config: ReturnType<typeof getConfig>;
+  requestId: string;
+  sharedContext: string;
+  approvedAnalysis: string;
+  evidencePlan: string;
+  sectionTargets: SectionTarget[];
+}): Promise<ChatCallResult> {
+  const targets = sectionTargets.length ? sectionTargets : fallbackSectionTargets(1000);
+  const draftedSections: DraftSection[] = [];
+
+  for (let index = 0; index < targets.length; index += 1) {
+    const target = targets[index];
+    const previousSections = draftedSections.map((section) => section.content.trim()).join("\n\n---\n\n");
+    const response = await callAiChat({
+      config,
+      requestId,
+      stage: `section-draft-${index + 1}`,
+      temperature: 0.35,
+      system: assignmentPipelineSystem("single section draft"),
+      prompt: `${sharedContext}
+
+Approved analysis and full section plan:
+${approvedAnalysis}
+
+Evidence plan for the full assignment:
+${evidencePlan}
+
+Stage 3: Write one assignment section only.
+
+Section to write: ${target.title}
+Target word count for this section: ${target.target}
+Accepted range for this section: ${Math.ceil(target.target * 0.9)} to ${Math.floor(target.target * 1.1)} words
+Section number: ${index + 1} of ${targets.length}
+${formatSectionTargetDetails(target)}
+
+Previously written sections for continuity. Do not repeat this content:
+${previousSections || "None. This is the first section."}
+
+Rules:
+- Return only this section.
+- Start with the exact markdown heading: ## ${target.title}
+- Write developed academic paragraphs, not notes or bullets.
+- Aim for the target word count now. Do not rely on later stages to expand the section.
+- Use only details the user supplied. Do not invent the organisation, industry, staff roles, software names, books, journal articles, URLs, DOI values, page numbers, quotes, statistics, or named authors.
+- Every claim that needs support must have an inline citation or an inline placeholder where the claim is made.
+- If information is missing, continue writing with clear inline placeholders instead of skipping the section.
+- Never write text such as "this section was not included", "should be developed", or "not provided".
+- Do not add "References used in this section" lists.
+- Do not include brief analysis, writing plans, word-count checks, notes to the user, or final checklists.
+- Return only the completed section.`,
+    });
+
+    if (!response.ok) return response;
+    const initialSection = normalizeRewrittenSection(response.text, target.title);
+    const checked = await rewriteSectionToWordTarget({
+      config,
+      requestId,
+      sharedContext,
+      analysis: approvedAnalysis,
+      section: initialSection,
+      target,
+      stagePrefix: `section-draft-word-count-${index + 1}`,
+    });
+    draftedSections.push(checked.section);
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    text: orderSectionsByPlan(draftedSections, targets).map((section) => section.content.trim()).join("\n\n"),
+  };
+}
+
 async function verifySectionWordCounts({
   config,
   requestId,
@@ -641,55 +709,19 @@ async function verifySectionWordCounts({
     const original = sourceSections[index];
     const fallbackTarget = Math.max(50, Math.round((getTotalTarget(sectionTargets) || 1000) / sourceSections.length));
     const target = targets[index] || { title: original.title, target: fallbackTarget };
-    let section = original;
-    let report = buildWordCountReport(stripReferenceBlocks(section.content), target.target);
-    let attempts = 0;
-    let adjusted = false;
+    const checked = await rewriteSectionToWordTarget({
+      config,
+      requestId,
+      sharedContext,
+      analysis,
+      section: original,
+      target,
+      stagePrefix: `section-word-count-rewrite-${index + 1}`,
+    });
 
-    while (!report.withinRange && attempts < 2) {
-      attempts += 1;
-      const rewrite = await callAiChat({
-        config,
-        requestId,
-        stage: `section-word-count-rewrite-${index + 1}-${attempts}`,
-        temperature: 0.25,
-        system: assignmentPipelineSystem("section word-count rewrite"),
-        prompt: `${sharedContext}
-
-Stage 3: Rewrite one assignment section so its own code-counted word count is within 10%.
-
-Approved analysis and plan:
-${analysis}
-
-Section title: ${target.title}
-Target for this section: ${target.target} words
-Accepted range for this section: ${report.lower} to ${report.upper} words
-Current code-counted section words: ${report.actual}
-Rewrite attempt: ${attempts} of 2
-
-Rules:
-- Rewrite only this section.
-- Preserve the section heading.
-- Preserve the argument, citations, and source placeholders.
-- If it is too short, add useful analysis tied to the brief and rubric.
-- If it is too long, tighten wording without removing required evidence.
-- Do not add unrelated sections.
-- Do not add a "References used in this section" list.
-- Return only this section.
-
-Section to rewrite:
-${section.content}`,
-      });
-
-      if (!rewrite.ok || !rewrite.text) break;
-      section = normalizeRewrittenSection(rewrite.text, target.title);
-      report = buildWordCountReport(stripReferenceBlocks(section.content), target.target);
-      adjusted = true;
-    }
-
-    if (adjusted) adjustedCount += 1;
-    verified.push(section);
-    reports.push({ title: target.title, ...report, attempts, adjusted });
+    if (checked.report.adjusted) adjustedCount += 1;
+    verified.push(checked.section);
+    reports.push(checked.report);
   }
 
   return {
@@ -800,6 +832,7 @@ function parseAssignmentAnalysis(text: string): AssignmentBriefAnalysis | null {
             purpose: stringValue(item.purpose, "Draft this section according to the brief."),
             rubricLinks: stringArray(item.rubricLinks),
             evidenceNeeded: stringArray(item.evidenceNeeded),
+            toneAndApproach: stringValue(item.toneAndApproach, ""),
           };
         })
         .filter((section): section is NonNullable<typeof section> => Boolean(section))
@@ -816,6 +849,78 @@ function parseAssignmentAnalysis(text: string): AssignmentBriefAnalysis | null {
     sections,
     integratedQualityCriteria: stringArray(record.integratedQualityCriteria),
     mustNotInvent: stringArray(record.mustNotInvent),
+  };
+}
+
+async function rewriteSectionToWordTarget({
+  config,
+  requestId,
+  sharedContext,
+  analysis,
+  section,
+  target,
+  stagePrefix,
+}: {
+  config: ReturnType<typeof getConfig>;
+  requestId: string;
+  sharedContext: string;
+  analysis: string;
+  section: DraftSection;
+  target: SectionTarget;
+  stagePrefix: string;
+}): Promise<{ section: DraftSection; report: SectionWordReport }> {
+  let current = normalizeRewrittenSection(section.content, target.title);
+  let report = buildWordCountReport(stripReferenceBlocks(current.content), target.target);
+  let attempts = 0;
+  let adjusted = false;
+
+  while (!report.withinRange && attempts < 2) {
+    attempts += 1;
+    const rewrite = await callAiChat({
+      config,
+      requestId,
+      stage: `${stagePrefix}-${attempts}`,
+      temperature: 0.25,
+      system: assignmentPipelineSystem("section word-count rewrite"),
+      prompt: `${sharedContext}
+
+Rewrite one assignment section so its own code-counted word count is within 10%.
+
+Approved analysis and plan:
+${analysis}
+
+Section title: ${target.title}
+Target for this section: ${target.target} words
+Accepted range for this section: ${report.lower} to ${report.upper} words
+Current code-counted section words: ${report.actual}
+Rewrite attempt: ${attempts} of 2
+${formatSectionTargetDetails(target)}
+
+Rules:
+- Rewrite only this section.
+- Preserve the section heading.
+- Preserve the argument, citations, and source placeholders.
+- If it is too short, add useful analysis tied to the brief and rubric.
+- If it is too long, tighten wording without removing required evidence.
+- Keep the section as developed paragraphs, not bullet notes.
+- Do not add unrelated sections.
+- Do not add a "References used in this section" list.
+- Do not add word-count notes, planning notes, or checklists.
+- Return only this section.
+
+Section to rewrite:
+${current.content}`,
+    });
+
+    if (!rewrite.ok || !rewrite.text) break;
+    current = normalizeRewrittenSection(rewrite.text, target.title);
+    report = buildWordCountReport(stripReferenceBlocks(current.content), target.target);
+    adjusted = true;
+  }
+
+  return {
+    section: current,
+    report: { title: target.title, ...report, attempts, adjusted },
   };
 }
 
@@ -871,7 +976,9 @@ function formatStructuredAnalysis(analysis: AssignmentBriefAnalysis, targetWords
     const source = analysis.sections?.find((item) => normalizeTitle(item.title) === normalizeTitle(section.title));
     const purpose = source?.purpose || "Draft this section according to the brief.";
     const evidence = source?.evidenceNeeded?.length ? ` Evidence needed: ${source.evidenceNeeded.join("; ")}.` : "";
-    return `- ${section.title}: ${section.target} words. ${purpose}${evidence}`;
+    const rubric = source?.rubricLinks?.length ? ` Rubric links: ${source.rubricLinks.join("; ")}.` : "";
+    const tone = source?.toneAndApproach ? ` Tone and approach: ${source.toneAndApproach}.` : "";
+    return `- ${section.title}: ${section.target} words. ${purpose}${rubric}${evidence}${tone}`;
   });
 
   return `# Brief Analysis
@@ -896,6 +1003,10 @@ function sectionTargetsFromStructuredAnalysis(analysis: AssignmentBriefAnalysis,
     .map((section) => ({
       title: section.title,
       target: Math.max(50, Math.round(section.targetWords)),
+      purpose: section.purpose,
+      rubricLinks: section.rubricLinks,
+      evidenceNeeded: section.evidenceNeeded,
+      toneAndApproach: section.toneAndApproach,
     }))
     .filter((section) => section.title && !isNonContentSectionTitle(section.title) && section.target > 0);
 
@@ -1086,7 +1197,7 @@ function normalizeSectionTargets(targets: SectionTarget[], totalTarget: number):
   if (Math.abs(total - totalTarget) <= Math.max(5, totalTarget * 0.02)) return targets;
 
   const normalized = targets.map((target) => ({
-    title: target.title,
+    ...target,
     target: Math.max(50, Math.round((target.target / total) * totalTarget)),
   }));
   const difference = totalTarget - getTotalTarget(normalized);
@@ -1102,12 +1213,21 @@ function fallbackSectionTargets(totalTarget: number): SectionTarget[] {
   const conclusion = totalTarget - intro - first - second - evaluation;
 
   return [
-    { title: "Introduction", target: intro },
-    { title: "Main Section 1", target: first },
-    { title: "Main Section 2", target: second },
-    { title: "Counterpoint or Evaluation", target: evaluation },
-    { title: "Conclusion", target: conclusion },
+    { title: "Introduction", target: intro, purpose: "Introduce the assignment focus, scope, and argument." },
+    { title: "Main Section 1", target: first, purpose: "Develop the first major requirement from the brief." },
+    { title: "Main Section 2", target: second, purpose: "Develop the next major requirement from the brief." },
+    { title: "Counterpoint or Evaluation", target: evaluation, purpose: "Evaluate limitations, tensions, or implications required by the brief." },
+    { title: "Conclusion", target: conclusion, purpose: "Synthesize the argument without adding new evidence." },
   ];
+}
+
+function formatSectionTargetDetails(target: SectionTarget): string {
+  const details: string[] = [];
+  if (target.purpose) details.push(`Section purpose: ${target.purpose}`);
+  if (target.rubricLinks?.length) details.push(`Rubric criteria this section must satisfy: ${target.rubricLinks.join("; ")}`);
+  if (target.evidenceNeeded?.length) details.push(`Evidence and claims this section must cover: ${target.evidenceNeeded.join("; ")}`);
+  if (target.toneAndApproach) details.push(`Tone and approach: ${target.toneAndApproach}`);
+  return details.length ? `\n${details.join("\n")}` : "";
 }
 
 function splitDraftSections(text: string): DraftSection[] {
