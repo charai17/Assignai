@@ -423,50 +423,6 @@ Rules:
 
   let finalDraft = humanizedSections.text;
   let wordReport = buildWordCountReport(finalDraft, targetWords);
-  let adjusted = false;
-
-  for (let adjustmentAttempt = 1; !wordReport.withinRange && adjustmentAttempt <= 4; adjustmentAttempt += 1) {
-    const adjustmentMode = wordReport.actual < wordReport.lower ? "expand" : "tighten";
-    const adjustment = await callAiChat({
-      config,
-      requestId,
-      stage: `final-word-count-adjustment-${adjustmentAttempt}`,
-      temperature: 0.25,
-      system: assignmentPipelineSystem("final adjustment"),
-      prompt: `${sharedContext}
-
-Stage 7: ${adjustmentMode === "expand" ? "Expand" : "Tighten"} this final draft so the code-counted total word count lands between ${lower} and ${upper} words.
-
-Current code-counted words: ${wordReport.actual}
-Target words: ${targetWords}
-Accepted range: ${lower} to ${upper}
-Adjustment attempt: ${adjustmentAttempt} of 4
-
-Approved section plan and targets:
-${approvedAnalysis}
-
-Rules:
-- Preserve the argument, section headings, citations, and source placeholders.
-- Keep inline citations and placeholders attached to the claims they support.
-- Do not remove, rewrite, relocate, or add inline citations.
-- Keep section proportions close to the verified section draft.
-- If the draft is too short, expand every underdeveloped section with useful analysis, explanation, evaluation, and application to the brief.
-- If a section currently contains a note saying it was not included or should be developed, replace that note with the full section.
-- If the draft is too long, tighten wording without deleting key evidence.
-- Do not add a reference list.
-- Do not add notes, checks, planning material, or "References used in this section" blocks.
-- Return only the adjusted assignment/report draft.
-
-Draft:
-${finalDraft}`,
-    });
-
-    if (adjustment.ok && adjustment.text) {
-      finalDraft = adjustment.text;
-      wordReport = buildWordCountReport(finalDraft, targetWords);
-      adjusted = true;
-    }
-  }
 
   const references = formatCitationSections({
     references: citationPass.references,
@@ -476,7 +432,7 @@ ${finalDraft}`,
     ]),
     citationStyle,
   });
-  const wordCountSection = formatWordCountReport(wordReport, adjusted);
+  const wordCountSection = formatWordCountReport(wordReport, false);
   const qualityNotice = formatQualityNotice(wordReport, humanizedSections.reports);
 
   return {
@@ -503,8 +459,8 @@ ${wordCountSection}`,
           qualityReview.ok && /^ISSUES:/i.test(qualityReview.text.trim()) ? "quality-rewrite" : "quality-pass",
           "claim-level-citation-pass",
           "humanize-sections",
-          humanizedSections.adjustedCount > 0 ? "post-humanize-section-rewrite-loop" : "post-humanize-section-check-pass",
-          adjusted ? "final-word-count-adjustment" : "final-word-count-check",
+          humanizedSections.adjustedCount > 0 ? "humanize-section-fallback" : "humanize-section-pass",
+          "final-word-count-check",
           "reference-sort",
         ],
         wordCount: wordReport,
@@ -754,7 +710,7 @@ async function humanizeSectionsIndividually({
   const targets = alignSectionTargets(sections, sectionTargets);
   const humanized: DraftSection[] = [];
   const reports: SectionWordReport[] = [];
-  let adjustedCount = 0;
+  let fallbackCount = 0;
 
   for (let index = 0; index < sections.length; index += 1) {
     const section = sections[index];
@@ -793,21 +749,28 @@ Section to humanize:
 ${section.content}`,
     });
 
-    if (!response.ok) return { ...response, reports, adjustedCount };
+    if (!response.ok) return { ...response, reports, adjustedCount: fallbackCount };
     const normalized = normalizeRewrittenSection(response.text, target.title);
-    const checked = await rewriteSectionToWordTarget({
-      config,
-      requestId,
-      sharedContext,
-      analysis,
-      section: normalized,
-      target,
-      stagePrefix: `post-humanize-section-word-count-${index + 1}`,
-    });
+    const humanizedReport = buildWordCountReport(stripReferenceBlocks(normalized.content), target.target);
 
-    if (checked.report.adjusted) adjustedCount += 1;
-    humanized.push(checked.section);
-    reports.push(checked.report);
+    if (humanizedReport.withinRange) {
+      humanized.push(normalized);
+      reports.push({ title: target.title, ...humanizedReport, attempts: 0, adjusted: false });
+      continue;
+    }
+
+    fallbackCount += 1;
+    console.warn("assignai humanized section rejected for word count", {
+      requestId,
+      title: target.title,
+      target: humanizedReport.target,
+      lower: humanizedReport.lower,
+      upper: humanizedReport.upper,
+      actual: humanizedReport.actual,
+    });
+    const originalReport = buildWordCountReport(stripReferenceBlocks(section.content), target.target);
+    humanized.push(section);
+    reports.push({ title: target.title, ...originalReport, attempts: 0, adjusted: false });
   }
 
   return {
@@ -815,7 +778,7 @@ ${section.content}`,
     status: 200,
     text: orderSectionsByPlan(humanized, sectionTargets).map((section) => section.content.trim()).join("\n\n"),
     reports,
-    adjustedCount,
+    adjustedCount: fallbackCount,
   };
 }
 
