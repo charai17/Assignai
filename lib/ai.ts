@@ -80,7 +80,7 @@ Core rules:
 export async function generateResult({ kind, input, payload, requestId }: GenerateRequest): Promise<GenerateResponse> {
   const config = getConfig();
 
-  if (config.ai.provider === "mock" || !config.ai.openRouterApiKey) {
+  if (!hasConfiguredAiProvider(config)) {
     return { status: 200, result: mockResult(kind, input, payload, requestId) };
   }
 
@@ -88,7 +88,7 @@ export async function generateResult({ kind, input, payload, requestId }: Genera
     return generateAssignmentPipeline({ input, payload, requestId, config });
   }
 
-  const response = await callOpenRouter({
+  const response = await callAiChat({
     config,
     requestId,
     system: systemPromptFor(kind),
@@ -101,7 +101,7 @@ export async function generateResult({ kind, input, payload, requestId }: Genera
       status: 502,
       result: {
         ok: false,
-        result: response.error || `OpenRouter returned HTTP ${response.status}.`,
+        result: response.error || `${providerLabel(config)} returned HTTP ${response.status}.`,
         raw: { requestId, provider: config.ai.provider, status: response.status },
       },
     };
@@ -111,8 +111,8 @@ export async function generateResult({ kind, input, payload, requestId }: Genera
     status: 200,
     result: {
       ok: true,
-      result: response.text || "OpenRouter returned an empty response.",
-      raw: { requestId, provider: config.ai.provider, model: config.ai.openRouterModel },
+      result: response.text || `${providerLabel(config)} returned an empty response.`,
+      raw: { requestId, provider: config.ai.provider, model: activeModel(config) },
     },
   };
 }
@@ -128,7 +128,7 @@ async function generateAssignmentPipeline({
   const upper = Math.floor(targetWords * 1.1);
   const sharedContext = assignmentContext(input, payload, targetWords);
 
-  const analysis = await callOpenRouter({
+  const analysis = await callAiChat({
     config,
     requestId,
     stage: "analysis",
@@ -164,7 +164,7 @@ List the writing order and what each stage must achieve.`,
 
   if (!analysis.ok) return assignmentStageError("analysis", analysis, requestId, config.ai.provider);
 
-  const sectionDraft = await callOpenRouter({
+  const sectionDraft = await callAiChat({
     config,
     requestId,
     stage: "section-draft",
@@ -211,7 +211,7 @@ Rules:
   });
   const verifiedSectionDraft = sectionVerification.draft;
 
-  const humanizedDraft = await callOpenRouter({
+  const humanizedDraft = await callAiChat({
     config,
     requestId,
     stage: "humanize-draft",
@@ -244,7 +244,7 @@ Return only the polished final draft. Keep all citation placeholders and real so
   let adjusted = false;
 
   if (!wordReport.withinRange) {
-    const adjustment = await callOpenRouter({
+    const adjustment = await callAiChat({
       config,
       requestId,
       stage: "final-word-count-adjustment",
@@ -297,7 +297,7 @@ ${wordCountSection}`,
       raw: {
         requestId,
         provider: config.ai.provider,
-        model: config.ai.openRouterModel,
+        model: activeModel(config),
         pipeline: [
           "analysis",
           "section-draft",
@@ -340,7 +340,7 @@ async function completeMissingDraftSections({
     const alreadyDrafted = completedSections.some((section) => titleMatches(normalizeTitle(section.title), normalizeTitle(target.title)));
     if (alreadyDrafted) continue;
 
-    const generated = await callOpenRouter({
+    const generated = await callAiChat({
       config,
       requestId,
       stage: `missing-section-${index + 1}`,
@@ -417,7 +417,7 @@ async function verifySectionWordCounts({
 
     while (!report.withinRange && attempts < 2) {
       attempts += 1;
-      const rewrite = await callOpenRouter({
+      const rewrite = await callAiChat({
         config,
         requestId,
         stage: `section-word-count-rewrite-${index + 1}-${attempts}`,
@@ -468,25 +468,17 @@ ${section.content}`,
   };
 }
 
-async function callOpenRouter({ config, requestId, system, prompt, temperature, stage }: ChatCall): Promise<ChatCallResult> {
+async function callAiChat({ config, requestId, system, prompt, temperature, stage }: ChatCall): Promise<ChatCallResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.ai.timeoutMs);
 
   try {
-    const headers: Record<string, string> = {
-      "content-type": "application/json",
-      authorization: `Bearer ${config.ai.openRouterApiKey}`,
-      "x-request-id": requestId,
-      "x-title": config.ai.appTitle,
-    };
-
-    if (config.ai.appUrl) headers["http-referer"] = config.ai.appUrl;
-
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const requestConfig = aiRequestConfig(config, requestId);
+    const response = await fetch(requestConfig.url, {
       method: "POST",
-      headers,
+      headers: requestConfig.headers,
       body: JSON.stringify({
-        model: config.ai.openRouterModel,
+        model: requestConfig.model,
         messages: [
           { role: "system", content: system },
           { role: "user", content: prompt },
@@ -505,7 +497,7 @@ async function callOpenRouter({ config, requestId, system, prompt, temperature, 
         status: response.status,
         text,
         raw,
-        error: raw.error?.message || `OpenRouter returned HTTP ${response.status}${stage ? ` during ${stage}` : ""}.`,
+        error: raw.error?.message || `${providerLabel(config)} returned HTTP ${response.status}${stage ? ` during ${stage}` : ""}.`,
       };
     }
 
@@ -551,6 +543,53 @@ Rules:
 - Never turn marking criteria like referencing, structure, spelling, grammar, presentation, or formatting into standalone report sections.
 
 ${HUMANIZER_POLICY}`;
+}
+
+function hasConfiguredAiProvider(config: ReturnType<typeof getConfig>): boolean {
+  if (config.ai.provider === "openai") return Boolean(config.ai.openAiApiKey);
+  if (config.ai.provider === "openrouter") return Boolean(config.ai.openRouterApiKey);
+  return false;
+}
+
+function aiRequestConfig(config: ReturnType<typeof getConfig>, requestId: string): {
+  url: string;
+  model: string;
+  headers: Record<string, string>;
+} {
+  if (config.ai.provider === "openai") {
+    return {
+      url: "https://api.openai.com/v1/chat/completions",
+      model: config.ai.openAiModel,
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${config.ai.openAiApiKey}`,
+        "x-request-id": requestId,
+      },
+    };
+  }
+
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    authorization: `Bearer ${config.ai.openRouterApiKey}`,
+    "x-request-id": requestId,
+    "x-title": config.ai.appTitle,
+  };
+
+  if (config.ai.appUrl) headers["http-referer"] = config.ai.appUrl;
+
+  return {
+    url: "https://openrouter.ai/api/v1/chat/completions",
+    model: config.ai.openRouterModel,
+    headers,
+  };
+}
+
+function activeModel(config: ReturnType<typeof getConfig>): string {
+  return config.ai.provider === "openai" ? config.ai.openAiModel : config.ai.openRouterModel;
+}
+
+function providerLabel(config: ReturnType<typeof getConfig>): string {
+  return config.ai.provider === "openai" ? "OpenAI" : "OpenRouter";
 }
 
 function assignmentContext(input: string, payload: Record<string, unknown>, targetWords: number): string {
@@ -1030,3 +1069,4 @@ function shortTitle(input: string): string {
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+

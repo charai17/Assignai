@@ -50,9 +50,12 @@ Google sign-in uses `redirectTo: window.location.origin`, so the deployed domain
 
 ## AI Provider
 
-AssignAI uses OpenRouter in production when `OPENROUTER_API_KEY` is present. If no AI key is set, mock output keeps the UI testable.
+AssignAI can use OpenAI directly or OpenRouter. If `OPENAI_API_KEY` is set, the backend uses OpenAI. If only `OPENROUTER_API_KEY` is set, it uses OpenRouter. If no AI key is set, mock output keeps the UI testable.
 
 ```env
+AI_PROVIDER=
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4.1
 OPENROUTER_API_KEY=
 OPENROUTER_MODEL=openai/gpt-4.1-mini
 OPENROUTER_APP_URL=
@@ -63,6 +66,8 @@ MAX_INPUT_CHARS=20000
 RATE_LIMIT_WINDOW_MS=60000
 RATE_LIMIT_MAX_REQUESTS=20
 ```
+
+Signed-in users send their Supabase session token to the backend when generating. The backend saves successful generations to Supabase through row-level security, then the browser refreshes cloud history.
 
 ## Backend Routes
 

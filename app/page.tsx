@@ -14,6 +14,13 @@ type ApiResponse = {
   text?: string;
   error?: string;
   message?: string;
+  raw?: {
+    persistence?: {
+      saved?: boolean;
+      generationId?: string | null;
+      projectId?: string | null;
+    };
+  };
 };
 
 type PdfUploadResponse = {
@@ -271,7 +278,7 @@ export default function HomePage() {
     try {
       const response = await fetch(endpointForMode(mode), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await apiHeaders(),
         body: JSON.stringify(payloadForMode(mode)),
       });
 
@@ -289,7 +296,7 @@ export default function HomePage() {
       const generated = data.output || data.result || data.text || "";
       if (!generated) throw new Error("No output was returned from the server.");
       setOutput(generated);
-      await saveHistory(generated);
+      await saveHistory(generated, data.raw?.persistence?.saved === true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {
@@ -471,7 +478,7 @@ export default function HomePage() {
     setCopied(false);
   }
 
-  async function saveHistory(generated: string) {
+  async function saveHistory(generated: string, savedByBackend = false) {
     const entry: HistoryEntry = {
       id: crypto.randomUUID(),
       mode,
@@ -484,6 +491,12 @@ export default function HomePage() {
     const nextHistory = [entry, ...history].slice(0, 12);
     setHistory(nextHistory);
     window.localStorage.setItem(HISTORY_KEY, JSON.stringify(nextHistory));
+
+    if (savedByBackend) {
+      setSyncStatus("Saved to cloud history.");
+      if (supabase && user) await loadCloudHistory(user.id, supabase);
+      return;
+    }
 
     if (!supabase || !user) {
       setSyncStatus(hasSupabaseConfig() ? "Saved on this device. Sign in to sync." : "Saved on this device.");
@@ -529,6 +542,15 @@ export default function HomePage() {
     if (currentMode === "assignment") return "/api/assignment";
     if (currentMode === "humanizer") return "/api/humanize";
     return "/api/powerpoint";
+  }
+
+  async function apiHeaders(): Promise<HeadersInit> {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (!supabase) return headers;
+
+    const { data } = await supabase.auth.getSession();
+    if (data.session?.access_token) headers.Authorization = `Bearer ${data.session.access_token}`;
+    return headers;
   }
 
   function payloadForMode(currentMode: Mode) {

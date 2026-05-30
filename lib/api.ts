@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getConfig } from "./config";
 import { checkRateLimit } from "./rate-limit";
+import { saveGenerationFromRequest } from "./persistence";
 
 export type ApiResult = {
   ok: boolean;
@@ -14,6 +15,13 @@ export type ValidatedPayload = {
   input: string;
   payload: Record<string, unknown>;
 };
+
+export type GenerationRunner = (request: {
+  kind: ToolKind;
+  input: string;
+  payload: Record<string, unknown>;
+  requestId: string;
+}) => Promise<{ result: ApiResult; status: number }>;
 
 type JsonParseResult =
   | { ok: true; body: unknown }
@@ -101,4 +109,56 @@ export function applyRateLimit(request: Request, route: ToolKind, requestId: str
   response.headers.set("x-ratelimit-reset", String(Math.ceil(rateLimit.resetAt / 1000)));
 
   return response;
+}
+
+export async function handleGenerationRequest(
+  request: Request,
+  kind: ToolKind,
+  generate: GenerationRunner,
+): Promise<NextResponse<ApiResult>> {
+  const requestId = createRequestId();
+  const config = getConfig();
+  const rateLimited = applyRateLimit(request, kind, requestId);
+  if (rateLimited) return rateLimited;
+
+  const parsed = await parseJsonRequest(request);
+  if (!parsed.ok) {
+    return jsonResult({ ok: false, result: parsed.error, raw: { requestId } }, 400, requestId);
+  }
+
+  const validated = validateGenerationPayload(parsed.body, config.limits.maxInputChars);
+  if (!validated.ok) {
+    return jsonResult({ ok: false, result: validated.error, raw: { requestId } }, 400, requestId);
+  }
+
+  const { result, status } = await generate({
+    kind,
+    input: validated.value.input,
+    payload: validated.value.payload,
+    requestId,
+  });
+
+  if (result.ok && result.result) {
+    const persistence = await saveGenerationFromRequest({
+      request,
+      kind,
+      input: validated.value.input,
+      output: result.result,
+      payload: validated.value.payload,
+      model: modelFromRaw(result.raw),
+    });
+
+    result.raw = { ...(isRecord(result.raw) ? result.raw : {}), persistence };
+  }
+
+  return jsonResult(result, status, requestId);
+}
+
+function modelFromRaw(raw: unknown): string | undefined {
+  if (!isRecord(raw)) return undefined;
+  return typeof raw.model === "string" ? raw.model : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
 }
