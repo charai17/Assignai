@@ -15,6 +15,13 @@ type ApiResponse = {
   error?: string;
   message?: string;
   raw?: {
+    job?: {
+      id: string;
+      status: string;
+      output?: string | null;
+      error?: string | null;
+    };
+    jobId?: string;
     persistence?: {
       saved?: boolean;
       generationId?: string | null;
@@ -276,32 +283,78 @@ export default function HomePage() {
 
     setLoading(true);
     try {
-      const response = await fetch(endpointForMode(mode), {
-        method: "POST",
-        headers: await apiHeaders(),
-        body: JSON.stringify(payloadForMode(mode)),
-      });
-
-      let data: ApiResponse = {};
-      try {
-        data = (await response.json()) as ApiResponse;
-      } catch {
-        // Non-JSON responses are handled by the status/output checks below.
+      if (mode === "assignment" && user && supabase) {
+        try {
+          const generated = await generateAssignmentWithJob();
+          setOutput(generated);
+          await saveHistory(generated, true);
+          return;
+        } catch (jobError) {
+          setSyncStatus("Tracked jobs are not ready yet. Using direct generation for this request.");
+        }
       }
 
-      if (!response.ok || data.ok === false) {
-        throw new Error(data.result || data.error || data.message || "The request failed. Please try again.");
-      }
-
-      const generated = data.output || data.result || data.text || "";
-      if (!generated) throw new Error("No output was returned from the server.");
-      setOutput(generated);
-      await saveHistory(generated, data.raw?.persistence?.saved === true);
+      const direct = await generateDirect(mode);
+      setOutput(direct.generated);
+      await saveHistory(direct.generated, direct.savedByBackend);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function generateDirect(currentMode: Mode): Promise<{ generated: string; savedByBackend: boolean }> {
+    const response = await fetch(endpointForMode(currentMode), {
+      method: "POST",
+      headers: await apiHeaders(),
+      body: JSON.stringify(payloadForMode(currentMode)),
+    });
+
+    let data: ApiResponse = {};
+    try {
+      data = (await response.json()) as ApiResponse;
+    } catch {
+      // Non-JSON responses are handled by the status/output checks below.
+    }
+
+    if (!response.ok || data.ok === false) {
+      throw new Error(data.result || data.error || data.message || "The request failed. Please try again.");
+    }
+
+    const generated = data.output || data.result || data.text || "";
+    if (!generated) throw new Error("No output was returned from the server.");
+
+    return { generated, savedByBackend: data.raw?.persistence?.saved === true };
+  }
+
+  async function generateAssignmentWithJob(): Promise<string> {
+    const createResponse = await fetch("/api/jobs", {
+      method: "POST",
+      headers: await apiHeaders(),
+      body: JSON.stringify({ ...payloadForMode("assignment"), kind: "assignment" }),
+    });
+
+    const created = (await createResponse.json()) as ApiResponse;
+    if (!createResponse.ok || created.ok === false || !created.raw?.job?.id) {
+      throw new Error(created.result || created.error || created.message || "Could not create the assignment job.");
+    }
+
+    setSyncStatus("Assignment job queued. Writing now...");
+
+    const runResponse = await fetch(`/api/jobs/${created.raw.job.id}/run`, {
+      method: "POST",
+      headers: await apiHeaders(),
+    });
+
+    const run = (await runResponse.json()) as ApiResponse;
+    if (!runResponse.ok || run.ok === false) {
+      throw new Error(run.result || run.error || run.message || "The assignment job failed.");
+    }
+
+    const generated = run.output || run.result || run.text || run.raw?.job?.output || "";
+    if (!generated) throw new Error("The assignment job finished without output.");
+    return generated;
   }
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {

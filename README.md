@@ -15,7 +15,8 @@ The app opens on the Assignment Writer. Visitors can paste or upload a brief fir
 3. Word count defaults to `Auto-detect` and is capped at 5000 words.
 4. Clicking Generate before sign-up moves the user to account creation.
 5. Signed-in users get the full studio and Supabase cloud history.
-6. Outputs can be edited, copied, downloaded as text, exported as DOCX, or exported as PPTX for presentations.
+6. Signed-in Assignment Writer requests are tracked as generation jobs with queued, running, completed, and failed states.
+7. Outputs can be edited, copied, downloaded as text, exported as DOCX, or exported as PPTX for presentations.
 
 ## Assignment Writer Pipeline
 
@@ -69,6 +70,16 @@ RATE_LIMIT_MAX_REQUESTS=20
 
 Signed-in users send their Supabase session token to the backend when generating. The backend saves successful generations to Supabase through row-level security, then the browser refreshes cloud history.
 
+## Generation Jobs
+
+Assignment generation can run through `generation_jobs` so long drafts have durable status. The current app creates and runs the job from the browser session, which makes the database ready for a proper external worker later.
+
+```text
+POST /api/jobs
+GET  /api/jobs/:jobId
+POST /api/jobs/:jobId/run
+```
+
 ## Backend Routes
 
 ```text
@@ -78,6 +89,9 @@ POST /api/document/download
 POST /api/powerpoint
 POST /api/powerpoint/download
 POST /api/upload/pdf
+POST /api/jobs
+GET  /api/jobs/:jobId
+POST /api/jobs/:jobId/run
 GET  /api/health
 ```
 
