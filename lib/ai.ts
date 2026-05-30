@@ -1,5 +1,6 @@
 import { getConfig } from "./config";
 import type { ApiResult, ToolKind } from "./api";
+import { citeDraftClaims, formatCitationSections } from "./research";
 
 type GenerateRequest = {
   kind: ToolKind;
@@ -400,6 +401,15 @@ Rules:
     if (repairedDraft.ok && repairedDraft.text) verifiedSectionDraft = repairedDraft.text;
   }
 
+  const citationStyle = chooseCitationStyle(payload, structuredAnalysis, input);
+  const citationPass = await citeDraftClaims({
+    draft: verifiedSectionDraft,
+    assignmentContext: `${input}\n${approvedAnalysis}\n${evidencePlan.text}`,
+    citationStyle,
+    requestId,
+  });
+  verifiedSectionDraft = citationPass.citedDraft;
+
   const humanizedDraft = await callAiChat({
     config,
     requestId,
@@ -417,6 +427,7 @@ Important:
 - The section draft below has already been checked section by section with code.
 - Preserve the section headings, section balance, citations, and source placeholders.
 - Preserve inline citations and placeholders exactly where the supported claim appears.
+- Do not remove, rewrite, relocate, or add inline citations.
 - Do not allow humanizing to make any section much longer or shorter.
 - Remove any accidental "References used in this section" blocks.
 - Return a clean assignment/report draft only.
@@ -456,6 +467,7 @@ ${approvedAnalysis}
 Rules:
 - Preserve the argument, section headings, citations, and source placeholders.
 - Keep inline citations and placeholders attached to the claims they support.
+- Do not remove, rewrite, relocate, or add inline citations.
 - Keep section proportions close to the verified section draft.
 - If the draft is too short, expand every underdeveloped section with useful analysis, explanation, evaluation, and application to the brief.
 - If a section currently contains a note saying it was not included or should be developed, replace that note with the full section.
@@ -475,10 +487,14 @@ ${finalDraft}`,
     }
   }
 
-  const references = formatAlphabetizedReferences(
-    extractReferenceCandidates(`${verifiedSectionDraft}\n\n${finalDraft}`),
-    stringValue(payload.citationStyle, "Not specified"),
-  );
+  const references = formatCitationSections({
+    references: citationPass.references,
+    sourcesNeeded: sortReferencesAlphabetically([
+      ...citationPass.sourcesNeeded,
+      ...extractReferenceCandidates(`${verifiedSectionDraft}\n\n${finalDraft}`).filter((reference) => /^\[Add (source|full reference for):/i.test(reference)),
+    ]),
+    citationStyle,
+  });
   const wordCountSection = formatWordCountReport(wordReport, adjusted);
   const qualityNotice = formatQualityNotice(wordReport, sectionVerification.reports);
 
@@ -504,12 +520,18 @@ ${wordCountSection}`,
           "section-word-count-check",
           sectionVerification.adjustedCount > 0 ? "section-rewrite-loop" : "section-check-pass",
           qualityReview.ok && /^ISSUES:/i.test(qualityReview.text.trim()) ? "quality-rewrite" : "quality-pass",
+          "claim-level-citation-pass",
           "humanize-draft",
           adjusted ? "final-word-count-adjustment" : "final-word-count-check",
           "reference-sort",
         ],
         wordCount: wordReport,
         sectionWordCounts: sectionVerification.reports,
+        citations: {
+          style: citationStyle,
+          citedClaims: citationPass.citedClaims,
+          placeholderClaims: citationPass.placeholderClaims,
+        },
       },
     },
   };
@@ -1245,6 +1267,18 @@ function getTargetWordCount(payload: Record<string, unknown>, input = ""): numbe
 function getMissingInfoMode(payload: Record<string, unknown>): MissingInfoMode {
   const value = stringValue(payload.missingInfoMode, "ask").toLowerCase();
   return /continue|placeholder|generate/i.test(value) ? "continue" : "ask";
+}
+
+function chooseCitationStyle(payload: Record<string, unknown>, analysis: AssignmentBriefAnalysis | null, input: string): string {
+  const selected = stringValue(payload.citationStyle, "Auto-detect");
+  if (!/auto|detect|not specified/i.test(selected)) return selected;
+
+  const analyzed = analysis?.citationStyle || "";
+  if (/\bapa\b|apa\s*7/i.test(analyzed)) return "APA";
+  if (/harvard/i.test(analyzed)) return "Harvard";
+  if (/\bapa\b|apa\s*7/i.test(input)) return "APA";
+  if (/harvard/i.test(input)) return "Harvard";
+  return "Harvard";
 }
 
 function inferWordCountFromBrief(input: string, payload: Record<string, unknown>): number {

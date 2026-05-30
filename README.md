@@ -29,9 +29,10 @@ The app opens on the Assignment Writer. Visitors can paste or upload a brief fir
 7. **Section word counter:** code checks each section against its 90% to 110% target range.
 8. **Section rewriter:** AI rewrites only sections that fail the code word-count check.
 9. **Quality critic:** AI checks for missing sections, generic writing, invented facts, uncited claims, and rubric misses before humanizing.
-10. **Humanizer/editor:** AI polishes the verified draft without adding facts, sources, or hidden planning notes.
-11. **Reference sorter:** code extracts citation placeholders and source lines, deduplicates them, and sorts real references alphabetically at the bottom. Missing evidence stays in a separate `Sources Needed` list.
-12. **Final word counter:** code checks the final report draft and adds a short notice if the count still needs review.
+10. **Claim-level citation pass:** code scans the verified draft sentence by sentence. Every detected claim gets either a verified academic inline citation from OpenAlex or a precise inline source placeholder.
+11. **Reference builder:** only sources actually cited in the draft go into the alphabetized reference list. Missing evidence stays in a separate `Sources Needed` list.
+12. **Humanizer/editor:** AI polishes the verified draft without removing, moving, rewriting, or adding inline citations.
+13. **Final word counter:** code checks the final report draft and adds a short notice if the count still needs review.
 
 The user-facing output should be the assignment/report draft, alphabetized references, and word-count note only. It should not expose brief analysis, section planning, pipeline stages, or internal checklists.
 
