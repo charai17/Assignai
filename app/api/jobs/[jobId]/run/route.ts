@@ -4,6 +4,8 @@ import { getGenerationJob, kindFromMode, markJobCompleted, markJobFailed, markJo
 import { saveGenerationForUser } from "@/lib/persistence";
 
 export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+export const maxDuration = 300;
 
 export async function POST(request: Request, { params }: { params: { jobId: string } }) {
   const requestId = createRequestId();
