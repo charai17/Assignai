@@ -32,6 +32,8 @@ type OpenAlexWork = {
 const MAX_CLAIMS_TO_RESEARCH = 30;
 const SOURCE_LOOKUP_TIMEOUT_MS = 3_500;
 const MIN_CLAIM_WORDS = 7;
+const CLAIM_LOOKUP_BATCH_SIZE = 4;
+const RETRYABLE_SOURCE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 
 export async function citeDraftClaims({
   draft,
@@ -49,33 +51,47 @@ export async function citeDraftClaims({
   const sourcesNeeded = new Set<string>();
   let citedClaims = 0;
   let placeholderClaims = 0;
-  let researchedClaims = 0;
+  const planned = planCitationPass(draft);
+  const claimIndexes = planned
+    .map((segment, index) => ({ segment, index }))
+    .filter(({ segment }) => segment.kind === "sentence" && needsCitation(segment.text) && !hasInlineCitationOrPlaceholder(segment.text));
+  const researchedIndexes = claimIndexes.slice(0, MAX_CLAIMS_TO_RESEARCH);
+  const placeholderIndexes = claimIndexes.slice(MAX_CLAIMS_TO_RESEARCH);
+  const replacements = new Map<number, string>();
 
-  const citedDraft = await mapDraftSentences(draft, async (sentence) => {
-    if (!needsCitation(sentence)) return sentence;
-    if (hasInlineCitationOrPlaceholder(sentence)) return sentence;
+  for (const { segment, index } of placeholderIndexes) {
+    placeholderClaims += 1;
+    const placeholder = sourcePlaceholder(segment.text);
+    sourcesNeeded.add(placeholder);
+    replacements.set(index, appendCitation(segment.text, placeholder));
+  }
 
-    if (researchedClaims >= MAX_CLAIMS_TO_RESEARCH) {
-      placeholderClaims += 1;
-      const placeholder = sourcePlaceholder(sentence);
-      sourcesNeeded.add(placeholder);
-      return appendCitation(sentence, placeholder);
+  for (const batch of chunkArray(researchedIndexes, CLAIM_LOOKUP_BATCH_SIZE)) {
+    const results = await Promise.all(batch.map(async ({ segment, index }) => {
+      const source = await findSourceForClaim(segment.text, assignmentContext, requestId);
+      return { sentence: segment.text, index, source };
+    }));
+
+    for (const { sentence, index, source } of results) {
+      if (!source) {
+        placeholderClaims += 1;
+        const placeholder = sourcePlaceholder(sentence);
+        sourcesNeeded.add(placeholder);
+        replacements.set(index, appendCitation(sentence, placeholder));
+        continue;
+      }
+
+      citedClaims += 1;
+      references.set(referenceKey(source), formatReference(source, style));
+      replacements.set(index, appendCitation(sentence, inlineCitation(source, style)));
     }
+  }
 
-    researchedClaims += 1;
-    const source = await findSourceForClaim(sentence, assignmentContext, requestId);
-
-    if (!source) {
-      placeholderClaims += 1;
-      const placeholder = sourcePlaceholder(sentence);
-      sourcesNeeded.add(placeholder);
-      return appendCitation(sentence, placeholder);
-    }
-
-    citedClaims += 1;
-    references.set(referenceKey(source), formatReference(source, style));
-    return appendCitation(sentence, inlineCitation(source, style));
-  });
+  const citedDraft = planned.map((segment, index) => {
+    if (segment.kind !== "sentence") return segment.text;
+    if (replacements.has(index)) return replacements.get(index) || segment.text;
+    return segment.text;
+  }).join("");
 
   return {
     citedDraft,
@@ -115,22 +131,29 @@ export function normalizeCitationStyle(style: string, context: string): Citation
   return "harvard";
 }
 
-async function mapDraftSentences(draft: string, mapper: (sentence: string) => Promise<string>): Promise<string> {
-  const output: string[] = [];
+type DraftSegment =
+  | { kind: "text"; text: string }
+  | { kind: "sentence"; text: string };
 
-  for (const line of draft.split(/\r?\n/)) {
-    if (!line.trim() || /^#{1,4}\s+/.test(line.trim()) || /^[-*]\s+/.test(line.trim())) {
-      output.push(line);
+function planCitationPass(draft: string): DraftSegment[] {
+  const output: DraftSegment[] = [];
+
+  const lines = draft.split(/(\r?\n)/);
+  for (const line of lines) {
+    if (/^\r?\n$/.test(line)) {
+      output.push({ kind: "text", text: line });
       continue;
     }
 
-    const parts = splitSentences(line);
-    const mapped = [];
-    for (const part of parts) mapped.push(await mapper(part));
-    output.push(mapped.join(""));
+    if (!line.trim() || /^#{1,4}\s+/.test(line.trim()) || /^[-*]\s+/.test(line.trim())) {
+      output.push({ kind: "text", text: line });
+      continue;
+    }
+
+    for (const part of splitSentences(line)) output.push({ kind: "sentence", text: part });
   }
 
-  return output.join("\n");
+  return output;
 }
 
 function splitSentences(text: string): string[] {
@@ -159,28 +182,69 @@ async function findSourceForClaim(claim: string, assignmentContext: string, requ
   url.searchParams.set("search", query);
   url.searchParams.set("per-page", "5");
   url.searchParams.set("sort", "relevance_score:desc");
+
+  const response = await fetchWithRetry(url, {
+    headers: {
+      "user-agent": "AssignAI/0.1 research citation pass",
+      "x-request-id": requestId,
+    },
+    timeoutMs: SOURCE_LOOKUP_TIMEOUT_MS,
+    retries: 2,
+  });
+
+  if (!response?.ok) return null;
+  const data = await response.json().catch(() => null) as { results?: OpenAlexWork[] } | null;
+  const works = data?.results || [];
+  const source = works.map(openAlexToSource).find(Boolean) || null;
+  if (!source) return null;
+
+  return source;
+}
+
+async function fetchWithRetry(url: URL, {
+  headers,
+  timeoutMs,
+  retries,
+}: {
+  headers: Record<string, string>;
+  timeoutMs: number;
+  retries: number;
+}): Promise<Response | null> {
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const response = await fetchWithTimeout(url, headers, timeoutMs);
+    if (response?.ok || (response && !RETRYABLE_SOURCE_STATUSES.has(response.status)) || attempt === retries) return response;
+    await sleep(backoffDelay(attempt));
+  }
+
+  return null;
+}
+
+async function fetchWithTimeout(url: URL, headers: Record<string, string>, timeoutMs: number): Promise<Response | null> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), SOURCE_LOOKUP_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const response = await fetch(url, {
-      headers: {
-        "user-agent": "AssignAI/0.1 research citation pass",
-        "x-request-id": requestId,
-      },
+    return await fetch(url, {
+      headers,
       signal: controller.signal,
     }).catch(() => null);
-
-    if (!response?.ok) return null;
-    const data = await response.json().catch(() => null) as { results?: OpenAlexWork[] } | null;
-    const works = data?.results || [];
-    const source = works.map(openAlexToSource).find(Boolean) || null;
-    if (!source) return null;
-
-    return source;
   } finally {
     clearTimeout(timeout);
   }
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size));
+  return chunks;
+}
+
+function backoffDelay(attempt: number): number {
+  return 600 * 2 ** attempt + Math.floor(Math.random() * 250);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function openAlexToSource(work: OpenAlexWork): ResearchSource | null {

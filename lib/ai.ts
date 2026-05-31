@@ -86,6 +86,9 @@ type AssignmentBriefAnalysis = {
   mustNotInvent?: string[];
 };
 
+const AI_MAX_RETRIES = 2;
+const RETRYABLE_AI_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+
 const HUMANIZER_POLICY = `Natural writing policy adapted from blader/humanizer v2.7.0 (MIT). Use it as editing guidance for clarity, voice, and readability, not as a promise to bypass detectors.
 
 Core rules:
@@ -770,68 +773,96 @@ ${section.content}`,
 }
 
 async function callAiChat({ config, requestId, system, prompt, temperature, stage }: ChatCall): Promise<ChatCallResult> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), config.ai.timeoutMs);
   const startedAt = Date.now();
   const stageName = stage || "chat";
   console.info("assignai ai stage start", { requestId, stage: stageName, model: activeModel(config) });
 
-  try {
+  for (let attempt = 0; attempt <= AI_MAX_RETRIES; attempt += 1) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), config.ai.timeoutMs);
     const requestConfig = aiRequestConfig(config, requestId);
-    const response = await fetch(requestConfig.url, {
-      method: "POST",
-      headers: requestConfig.headers,
-      body: JSON.stringify({
-        model: requestConfig.model,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: prompt },
-        ],
-        temperature,
-      }),
-      signal: controller.signal,
-    });
 
-    const raw = (await response.json().catch(() => ({}))) as ChatResponse;
-    const text = normalizeChatText(raw);
-    const durationMs = Date.now() - startedAt;
-    console.info("assignai ai stage end", {
-      requestId,
-      stage: stageName,
-      status: response.status,
-      ok: response.ok,
-      durationMs,
-      outputChars: text.length,
-    });
+    try {
+      const response = await fetch(requestConfig.url, {
+        method: "POST",
+        headers: requestConfig.headers,
+        body: JSON.stringify({
+          model: requestConfig.model,
+          messages: [
+            { role: "system", content: system },
+            { role: "user", content: prompt },
+          ],
+          temperature,
+        }),
+        signal: controller.signal,
+      });
 
-    if (!response.ok) {
-      return {
-        ok: false,
+      const raw = (await response.json().catch(() => ({}))) as ChatResponse;
+      const text = normalizeChatText(raw);
+      const durationMs = Date.now() - startedAt;
+      console.info("assignai ai stage end", {
+        requestId,
+        stage: stageName,
         status: response.status,
-        text,
-        raw,
-        error: raw.error?.message || `${providerLabel(config)} returned HTTP ${response.status}${stage ? ` during ${stage}` : ""}.`,
-      };
+        ok: response.ok,
+        durationMs,
+        outputChars: text.length,
+        attempt: attempt + 1,
+      });
+
+      if (!response.ok) {
+        if (attempt < AI_MAX_RETRIES && RETRYABLE_AI_STATUSES.has(response.status)) {
+          await waitBeforeRetry(attempt, requestId, stageName, response.status);
+          continue;
+        }
+
+        return {
+          ok: false,
+          status: response.status,
+          text,
+          raw,
+          error: raw.error?.message || `${providerLabel(config)} returned HTTP ${response.status}${stage ? ` during ${stage}` : ""}.`,
+        };
+      }
+
+      return { ok: true, status: response.status, text, raw };
+    } catch (error) {
+      console.error("assignai ai stage error", {
+        requestId,
+        stage: stageName,
+        durationMs: Date.now() - startedAt,
+        attempt: attempt + 1,
+        error: error instanceof Error ? error.message : String(error),
+      });
+
+      if (attempt < AI_MAX_RETRIES) {
+        await waitBeforeRetry(attempt, requestId, stageName, 502);
+        continue;
+      }
+
+      const message = error instanceof Error && error.name === "AbortError"
+        ? `AI request timed out${stage ? ` during ${stage}` : ""}. Please try again.`
+        : error instanceof Error && error.message
+          ? `AI request failed${stage ? ` during ${stage}` : ""}: ${error.message}`
+          : `AI request failed${stage ? ` during ${stage}` : ""}.`;
+
+      return { ok: false, status: 502, text: "", error: message };
+    } finally {
+      clearTimeout(timeout);
     }
-
-    return { ok: true, status: response.status, text, raw };
-  } catch (error) {
-    console.error("assignai ai stage error", {
-      requestId,
-      stage: stageName,
-      durationMs: Date.now() - startedAt,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    const message = error instanceof Error && error.name === "AbortError"
-      ? `AI request timed out${stage ? ` during ${stage}` : ""}. Please try again.`
-      : error instanceof Error && error.message
-        ? `AI request failed${stage ? ` during ${stage}` : ""}: ${error.message}`
-        : `AI request failed${stage ? ` during ${stage}` : ""}.`;
-
-    return { ok: false, status: 502, text: "", error: message };
-  } finally {
-    clearTimeout(timeout);
   }
+
+  return { ok: false, status: 502, text: "", error: `AI request failed${stage ? ` during ${stage}` : ""}.` };
+}
+
+async function waitBeforeRetry(attempt: number, requestId: string, stage: string, status: number): Promise<void> {
+  const delayMs = 900 * 2 ** attempt + Math.floor(Math.random() * 300);
+  console.info("assignai ai stage retry scheduled", { requestId, stage, status, attempt: attempt + 1, delayMs });
+  await sleep(delayMs);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function assignmentStageError(stage: string, response: ChatCallResult, requestId: string, provider: string): GenerateResponse {
